@@ -6,18 +6,23 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/google/uuid"
+	uuid "github.com/google/uuid"
 	"github.com/katexochen/sync/internal/memstore"
 )
 
+type mutex struct {
+	sync.Mutex
+	nonce string
+}
+
 type mutexManager struct {
-	mutexes *memstore.Store[string, *sync.Mutex]
+	mutexes *memstore.Store[string, *mutex]
 	log     *slog.Logger
 }
 
 func newMutexManager(log *slog.Logger) *mutexManager {
 	return &mutexManager{
-		mutexes: memstore.New[string, *sync.Mutex](),
+		mutexes: memstore.New[string, *mutex](),
 		log:     log.WithGroup("mutexManager"),
 	}
 }
@@ -25,34 +30,47 @@ func newMutexManager(log *slog.Logger) *mutexManager {
 func (s *mutexManager) registerHandlers(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc(prefix+"/new", s.new)
 	mux.HandleFunc(prefix+"/{uuid}/lock", s.lock)
-	mux.HandleFunc(prefix+"/{uuid}/unlock", s.unlock)
+	// mux.HandleFunc(prefix+"/{uuid}/lock/{nonce}", s.lock)
+	mux.HandleFunc(prefix+"/{uuid}/unlock/{nonce}", s.unlock)
 	mux.HandleFunc(prefix+"/{uuid}/delete", s.delete)
 }
 
 func (s *mutexManager) new(w http.ResponseWriter, r *http.Request) {
 	uuid := uuid.New().String()
-	slog.Info("new called", "uuid", uuid)
-	s.mutexes.Put(uuid, &sync.Mutex{})
+	s.log.Info("new called", "uuid", uuid)
+	s.mutexes.Put(uuid, &mutex{})
 	resp := newMutexResponse{UUID: uuid}
 	writeJSON(w, resp)
 }
 
 func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
-	slog.Info("lock called", "uuid", uuid)
+	s.log.Info("lock called", "uuid", uuid)
+
 	m, ok := s.mutexes.Get(uuid)
 	if !ok {
 		slog.Warn("lock: not found", "uuid", uuid)
 		http.Error(w, "mutex not found", http.StatusNotFound)
 		return
 	}
+
+	nonce := r.PathValue("nonce")
+	if nonce == "" {
+		nonce = newNonce()
+		s.log.Info("lock: generated nonce", "uuid", uuid, "nonce", nonce)
+	}
 	m.Lock()
-	slog.Info("locked", "uuid", uuid)
+	m.nonce = nonce
+	s.log.Info("locked", "uuid", uuid, "nonce", nonce)
+	resp := lockMutexResponse{Nonce: nonce}
+	writeJSON(w, resp)
 }
 
 func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
-	slog.Info("unlock called", "uuid", uuid)
+	nonce := r.PathValue("nonce")
+	s.log.Info("unlock called", "uuid", uuid, "nonce", nonce)
+
 	m, ok := s.mutexes.Get(uuid)
 	if !ok {
 		slog.Warn("lock: not found", "uuid", uuid)
@@ -60,19 +78,28 @@ func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if m.nonce != nonce {
+		slog.Warn("lock: nonce mismatch", "want", m.nonce, "got", nonce)
+		http.Error(w, "invalid nonce", http.StatusForbidden)
+		return
+	}
+	m.nonce = ""
 	m.Unlock()
-	slog.Info("unlocked", "uuid", uuid)
+	s.log.Info("unlocked", "uuid", uuid)
 }
 
 func (s *mutexManager) delete(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
 	s.mutexes.Delete(uuid)
-	slog.Info("deleted", "uuid", uuid)
+	s.log.Info("deleted", "uuid", uuid)
 }
 
 type (
 	newMutexResponse struct {
-		UUID string `json:uuid`
+		UUID string `json:"uuid"`
+	}
+	lockMutexResponse struct {
+		Nonce string `json:"nonce"`
 	}
 )
 
@@ -80,4 +107,8 @@ func writeJSON(w http.ResponseWriter, resp any) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func newNonce() string {
+	return uuid.New().String()
 }

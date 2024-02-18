@@ -10,7 +10,7 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	log.Info("started")
 
-	mux := newMux()
+	mux := http.NewServeMux()
 	mm := newMutexManager(log)
 	mm.registerHandlers(mux, "/mutex")
 
@@ -18,9 +18,4 @@ func main() {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
 	}
-}
-
-func newMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	return mux
 }
