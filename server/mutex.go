@@ -36,18 +36,20 @@ func (s *mutexManager) registerHandlers(mux *http.ServeMux, prefix string) {
 
 func (s *mutexManager) new(w http.ResponseWriter, r *http.Request) {
 	uuid := uuid.New().String()
-	s.log.Info("new called", "uuid", uuid)
+	log := s.log.WithGroup("new").With("uuid", uuid)
+	log.Info("called")
 	s.mutexes.Put(uuid, &mutex{})
 	writeJSON(w, newMutexResponse{UUID: uuid})
 }
 
 func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
-	s.log.Info("lock called", "uuid", uuid)
+	log := s.log.WithGroup("lock").With("uuid", uuid)
+	log.Info("called")
 
 	m, ok := s.mutexes.Get(uuid)
 	if !ok {
-		slog.Warn("lock: not found", "uuid", uuid)
+		slog.Warn("not found")
 		http.Error(w, "mutex not found", http.StatusNotFound)
 		return
 	}
@@ -55,41 +57,43 @@ func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
 	nonce := newNonce()
 	m.Lock()
 	m.nonce = nonce
-	s.log.Info("locked", "uuid", uuid, "nonce", nonce)
+	log.Info("locked", "nonce", nonce)
 	writeJSON(w, lockMutexResponse{Nonce: nonce})
 }
 
 func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
 	nonce := r.PathValue("nonce")
-	s.log.Info("unlock called", "uuid", uuid, "nonce", nonce)
+	log := s.log.WithGroup("unlock").With("uuid", uuid, "nonce", nonce)
+	log.Info("called")
 
 	m, ok := s.mutexes.Get(uuid)
 	if !ok {
-		s.log.Warn("unlock: not found", "uuid", uuid)
+		log.Warn("not found")
 		http.Error(w, "mutex not found", http.StatusNotFound)
 		return
 	}
 
 	if m.nonce == "" {
-		s.log.Warn("unlock: mutex is not locked", "uuid", uuid)
+		log.Warn("mutex is not locked")
 		http.Error(w, "mutex not locked", http.StatusConflict)
 		return
 	} else if m.nonce != nonce {
-		s.log.Warn("unlock: nonce mismatch", "want", m.nonce, "got", nonce)
+		log.Warn("nonce mismatch", "wantNonce", m.nonce)
 		http.Error(w, "invalid nonce", http.StatusForbidden)
 		return
 	}
 
 	m.nonce = ""
 	m.Unlock()
-	s.log.Info("unlocked", "uuid", uuid)
+	log.Info("unlocked")
 }
 
 func (s *mutexManager) delete(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
+	log := s.log.WithGroup("unlock").With("uuid", uuid)
 	s.mutexes.Delete(uuid)
-	s.log.Info("deleted", "uuid", uuid)
+	log.Info("deleted")
 }
 
 type (
