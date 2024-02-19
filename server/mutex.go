@@ -30,7 +30,6 @@ func newMutexManager(log *slog.Logger) *mutexManager {
 func (s *mutexManager) registerHandlers(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc(prefix+"/new", s.new)
 	mux.HandleFunc(prefix+"/{uuid}/lock", s.lock)
-	// mux.HandleFunc(prefix+"/{uuid}/lock/{nonce}", s.lock)
 	mux.HandleFunc(prefix+"/{uuid}/unlock/{nonce}", s.unlock)
 	mux.HandleFunc(prefix+"/{uuid}/delete", s.delete)
 }
@@ -39,8 +38,7 @@ func (s *mutexManager) new(w http.ResponseWriter, r *http.Request) {
 	uuid := uuid.New().String()
 	s.log.Info("new called", "uuid", uuid)
 	s.mutexes.Put(uuid, &mutex{})
-	resp := newMutexResponse{UUID: uuid}
-	writeJSON(w, resp)
+	writeJSON(w, newMutexResponse{UUID: uuid})
 }
 
 func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
@@ -54,16 +52,11 @@ func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nonce := r.PathValue("nonce")
-	if nonce == "" {
-		nonce = newNonce()
-		s.log.Info("lock: generated nonce", "uuid", uuid, "nonce", nonce)
-	}
+	nonce := newNonce()
 	m.Lock()
 	m.nonce = nonce
 	s.log.Info("locked", "uuid", uuid, "nonce", nonce)
-	resp := lockMutexResponse{Nonce: nonce}
-	writeJSON(w, resp)
+	writeJSON(w, lockMutexResponse{Nonce: nonce})
 }
 
 func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
