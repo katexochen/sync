@@ -73,16 +73,21 @@ func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
 
 	m, ok := s.mutexes.Get(uuid)
 	if !ok {
-		slog.Warn("lock: not found", "uuid", uuid)
+		s.log.Warn("unlock: not found", "uuid", uuid)
 		http.Error(w, "mutex not found", http.StatusNotFound)
 		return
 	}
 
-	if m.nonce != nonce {
-		slog.Warn("lock: nonce mismatch", "want", m.nonce, "got", nonce)
+	if m.nonce == "" {
+		s.log.Warn("unlock: mutex is not locked", "uuid", uuid)
+		http.Error(w, "mutex not locked", http.StatusConflict)
+		return
+	} else if m.nonce != nonce {
+		s.log.Warn("unlock: nonce mismatch", "want", m.nonce, "got", nonce)
 		http.Error(w, "invalid nonce", http.StatusForbidden)
 		return
 	}
+
 	m.nonce = ""
 	m.Unlock()
 	s.log.Info("unlocked", "uuid", uuid)
