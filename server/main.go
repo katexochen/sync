@@ -13,6 +13,8 @@ func main() {
 	mux := http.NewServeMux()
 	mm := newMutexManager(log)
 	mm.registerHandlers(mux, "/mutex")
+	fm := newFifoManager(log)
+	fm.registerHandlers(mux, "/fifo")
 
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Error("fatal", "err", err)
