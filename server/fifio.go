@@ -66,6 +66,7 @@ func (f *fifo) start() {
 			case <-t.doneC:
 				f.log.Info("ticket completed", "ticket", t.TicketID)
 			}
+			f.ticketLookup.Delete(t.TicketID.String())
 		}
 	}()
 }
@@ -162,7 +163,6 @@ func (s *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 		log.Warn("ticket not found")
 		http.Error(w, "ticket not found", http.StatusNotFound)
 	}
-	fifo.ticketLookup.Delete(tickID)
 
 	tick.doneC <- struct{}{}
 	log.Info("ticket done")
