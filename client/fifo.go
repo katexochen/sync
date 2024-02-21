@@ -41,7 +41,7 @@ func runFifoNew(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
-	url, err := url.JoinPath(flags.endpoint, "fifo", "new")
+	url, err := urlJoin(flags.endpoint, "fifo", "new")
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func runFifoTicket(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
-	url, err := url.JoinPath(flags.endpoint, "fifo", flags.uuid, "ticket")
+	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "ticket")
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func runFifoWait(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
-	url, err := url.JoinPath(flags.endpoint, "fifo", flags.uuid, "wait", flags.ticketID)
+	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "wait", flags.ticketID)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func runFifoDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
-	url, err := url.JoinPath(flags.endpoint, "fifo", flags.uuid, "done", flags.ticketID)
+	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "done", flags.ticketID)
 	if err != nil {
 		return err
 	}
@@ -188,4 +188,12 @@ func parseFlagsNew(cmd *cobra.Command) (*flagsNew, error) {
 		uuid:     uuid,
 		ticketID: ticketID,
 	}, nil
+}
+
+func urlJoin(base string, pathSegments ...string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("parsing endpoint: %w", err)
+	}
+	return u.JoinPath(pathSegments...).String(), nil
 }
