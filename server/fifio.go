@@ -7,20 +7,21 @@ import (
 	"time"
 
 	uuidlib "github.com/google/uuid"
+	"github.com/katexochen/sync/api"
 	"github.com/katexochen/sync/internal/memstore"
 )
 
 type ticket struct {
-	TicketID uuidlib.UUID `json:"ticket"`
-	waitC    chan struct{}
-	doneC    chan struct{}
+	api.FifoTicketResponse
+	waitC chan struct{}
+	doneC chan struct{}
 }
 
 func newTicket() *ticket {
 	return &ticket{
-		TicketID: uuidlib.New(),
-		waitC:    make(chan struct{}),
-		doneC:    make(chan struct{}),
+		FifoTicketResponse: api.FifoTicketResponse{TicketID: uuidlib.New()},
+		waitC:              make(chan struct{}),
+		doneC:              make(chan struct{}),
 	}
 }
 
@@ -96,7 +97,7 @@ func (s *fifoManager) new(w http.ResponseWriter, r *http.Request) {
 	log.Info("called")
 	fifo.start()
 	s.fifos.Put(fifo.uuid.String(), fifo)
-	writeJSON(w, newFifoResponse{UUID: fifo.uuid})
+	writeJSON(w, api.FifoNewResponse{UUID: fifo.uuid})
 }
 
 func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
@@ -166,12 +167,6 @@ func (s *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 	tick.doneC <- struct{}{}
 	log.Info("ticket done")
 }
-
-type (
-	newFifoResponse struct {
-		UUID uuidlib.UUID `json:"uuid"`
-	}
-)
 
 func searchTicket(tickets *list.List, tickID string) (*ticket, bool) {
 	_, t, ok := searchTicketElement(tickets, tickID)
