@@ -26,23 +26,25 @@ func newTicket() *ticket {
 }
 
 type fifo struct {
-	uuid         uuidlib.UUID
-	waitTimeout  time.Duration
-	doneTimeout  time.Duration
-	ticketLookup *memstore.Store[string, *ticket]
-	ticketQueue  chan *ticket
-	log          *slog.Logger
+	uuid                 uuidlib.UUID
+	waitTimeout          time.Duration
+	doneTimeout          time.Duration
+	unusedDestroyTimeout time.Duration
+	ticketLookup         *memstore.Store[string, *ticket]
+	ticketQueue          chan *ticket
+	log                  *slog.Logger
 }
 
 func newFifo(log *slog.Logger) *fifo {
 	uuid := uuidlib.New()
 	return &fifo{
-		uuid:         uuid,
-		waitTimeout:  time.Minute,
-		doneTimeout:  10 * time.Minute,
-		ticketLookup: memstore.New[string, *ticket](),
-		ticketQueue:  make(chan *ticket, 100),
-		log:          log.WithGroup("fifo").With("uuid", uuid.String()),
+		uuid:                 uuid,
+		waitTimeout:          time.Minute,
+		doneTimeout:          10 * time.Minute,
+		unusedDestroyTimeout: 30 * 24 * time.Hour,
+		ticketLookup:         memstore.New[string, *ticket](),
+		ticketQueue:          make(chan *ticket, 100),
+		log:                  log.WithGroup("fifo").With("uuid", uuid.String()),
 	}
 }
 
@@ -50,9 +52,16 @@ func (f *fifo) start() {
 	go func() {
 		f.log.Info("started")
 		for {
+			var t *ticket
 			f.log.Info("waiting for ticket")
-			t := <-f.ticketQueue
-			f.log.Info("got ticket", "ticket", t.TicketID)
+			select {
+			case t = <-f.ticketQueue:
+				f.log.Info("got ticket", "ticket", t.TicketID)
+			case <-time.After(f.unusedDestroyTimeout):
+				f.log.Info("unused timeout reached, self destruction")
+				// TODO: remove referens in manager
+				return
+			}
 			select {
 			case <-time.After(f.waitTimeout):
 				f.log.Warn("timeout waiting for ticket owner", "ticket", t.TicketID)
