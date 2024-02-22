@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:katexochen/nixpkgs/gotools/go122";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -50,8 +50,10 @@
 
       devShells.default = pkgs.mkShell {
         packages = with pkgs; [
-          golangci-lint
           go_1_22
+          golangci-lint
+          gotools
+          gopls
         ];
         shellHook = ''alias make=just'';
       };
