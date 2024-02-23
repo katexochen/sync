@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
 
+export URL="http://localhost:8080"
+
 function newMutex() {
-    UUID=$(curl -fsS localhost:8080/mutex/new | jq -r '.uuid')
+    UUID=$(curl -fsS $URL/mutex/new | jq -r '.uuid')
     export UUID
 }
 
 function lockMutex() {
-    NONCE=$(curl -fsS "localhost:8080/mutex/$UUID/lock" | jq -r '.nonce')
+    NONCE=$(curl -fsS "$URL/mutex/$UUID/lock" | jq -r '.nonce')
     export NONCE
 }
 
 function unlockMutex() {
-    curl -fsSL "localhost:8080/mutex/$UUID/unlock/$NONCE"
+    curl -fsSL "$URL/mutex/$UUID/unlock/$NONCE"
 }
 
 function deleteMutex() {
-    curl -fsSL "localhost:8080/mutex/$UUID"
+    curl -fsSL "$URL/mutex/$UUID"
 }
 
 function newFifo() {
-    UUID=$(curl -fsS localhost:8080/fifo/new | jq -r '.uuid')
+    UUID=$(curl -fsS $URL/fifo/new | jq -r '.uuid')
     export UUID
 }
 
 function ticketFifo() {
-    TICKET=$(curl -fsS "localhost:8080/fifo/$UUID/ticket" | jq -r '.ticket')
+    TICKET=$(curl -fsS "$URL/fifo/$UUID/ticket" | jq -r '.ticket')
     export TICKET
 }
 
 function waitFifo() {
-    curl -fsSL "localhost:8080/fifo/$UUID/wait/$TICKET"
+    curl -fsSL "$URL/fifo/$UUID/wait/$TICKET"
 }
 
 function doneFifo() {
-    curl -fsSL "localhost:8080/fifo/$UUID/done/$TICKET"
+    curl -fsSL "$URL/fifo/$UUID/done/$TICKET"
 }
