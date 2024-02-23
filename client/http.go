@@ -12,6 +12,14 @@ type httpClient struct {
 	c *http.Client
 }
 
+type httpStatusCodeError struct {
+	StatusCode int
+}
+
+func (e *httpStatusCodeError) Error() string {
+	return fmt.Sprintf("status code %d", e.StatusCode)
+}
+
 func newHTTPClient() *httpClient {
 	return &httpClient{
 		c: &http.Client{},
@@ -30,8 +38,15 @@ func (c *httpClient) Get(ctx context.Context, url string) error {
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
-	_, err = c.c.Do(req)
-	return err
+	res, err := c.c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return &httpStatusCodeError{StatusCode: res.StatusCode}
+	}
+	return nil
 }
 
 func (c *httpClient) GetJSON(ctx context.Context, url string, resp any) error {
@@ -44,6 +59,9 @@ func (c *httpClient) GetJSON(ctx context.Context, url string, resp any) error {
 		return fmt.Errorf("performing request: %w", err)
 	}
 	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return &httpStatusCodeError{StatusCode: res.StatusCode}
+	}
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
 		return fmt.Errorf("decoding response: %w", err)
 	}
@@ -65,6 +83,9 @@ func (c *httpClient) PostJSON(ctx context.Context, url string, body, resp any) e
 		return fmt.Errorf("performing request: %w", err)
 	}
 	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return &httpStatusCodeError{StatusCode: res.StatusCode}
+	}
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
 		return fmt.Errorf("decoding response: %w", err)
 	}
