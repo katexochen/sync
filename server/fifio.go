@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	uuidlib "github.com/google/uuid"
@@ -12,14 +13,27 @@ import (
 
 type ticket struct {
 	api.FifoTicketResponse
+	// waitC is closed to notify any waiters that its the ticket's turn.
 	waitC chan struct{}
+	// waitAckC is closed to notify the fifo that the owner has been notified.
+	waitAckC chan struct{}
+	// waitAckOnce is used to ensure that waitAckC is closed only once.
+	waitAckOnce sync.Once
+	// doneC is closed to notify the fifo that the ticket is done.
 	doneC chan struct{}
+}
+
+func (t *ticket) waitAck() {
+	t.waitAckOnce.Do(func() {
+		close(t.waitAckC)
+	})
 }
 
 func newTicket() *ticket {
 	return &ticket{
 		FifoTicketResponse: api.FifoTicketResponse{TicketID: uuidlib.New()},
 		waitC:              make(chan struct{}),
+		waitAckC:           make(chan struct{}),
 		doneC:              make(chan struct{}),
 	}
 }
@@ -52,6 +66,7 @@ func (f *fifo) start() {
 		f.log.Info("started")
 		for {
 			var t *ticket
+
 			f.log.Info("waiting for ticket")
 			select {
 			case t = <-f.ticketQueue:
@@ -61,13 +76,19 @@ func (f *fifo) start() {
 				// TODO: remove referens in manager
 				return
 			}
+
+			close(t.waitC) // Boardcast to all waiters.
+
+			// Wait for the acknowledgement from the ticket owner.
 			select {
 			case <-time.After(f.waitTimeout):
 				f.log.Warn("timeout waiting for ticket owner", "ticket", t.TicketID)
 				continue
-			case t.waitC <- struct{}{}:
+			case <-t.waitAckC:
 				f.log.Info("ticket owner notified", "ticket", t.TicketID)
 			}
+
+			// Wait for the ticket to be done.
 			select {
 			case <-time.After(f.doneTimeout):
 				f.log.Warn("timeout waiting for ticket completion", "ticket", t.TicketID)
@@ -151,6 +172,7 @@ func (s *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("found ticket, waiting")
 	<-tick.waitC
+	tick.waitAck()
 	log.Info("my turn")
 }
 
