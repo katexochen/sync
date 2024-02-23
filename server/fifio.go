@@ -42,7 +42,7 @@ func newFifo(log *slog.Logger) *fifo {
 		doneTimeout:          10 * time.Minute,
 		unusedDestroyTimeout: 30 * 24 * time.Hour,
 		ticketLookup:         memstore.New[string, *ticket](),
-		ticketQueue:          make(chan *ticket, 100),
+		ticketQueue:          make(chan *ticket, 300),
 		log:                  log.WithGroup("fifo").With("uuid", uuid.String()),
 	}
 }
@@ -116,12 +116,13 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 
 	fifo, ok := s.fifos.Get(uuid)
 	if !ok {
-		slog.Warn("not found")
+		log.Warn("not found")
 		http.Error(w, "fifo not found", http.StatusNotFound)
 		return
 	}
 
 	tick := newTicket()
+	log.Info("ticket created", "ticket", tick.TicketID)
 	fifo.ticketLookup.Put(tick.TicketID.String(), tick)
 	fifo.ticketQueue <- tick
 
@@ -170,6 +171,7 @@ func (s *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		log.Warn("ticket not found")
 		http.Error(w, "ticket not found", http.StatusNotFound)
+		return
 	}
 
 	tick.doneC <- struct{}{}
