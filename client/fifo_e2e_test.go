@@ -125,6 +125,106 @@ func TestFifoConcurrent100(t *testing.T) {
 	wg.Wait()
 }
 
+func TestFifo100Waiting(t *testing.T) {
+	require := require.New(t)
+	ctx := context.Background()
+	endpoint := endpoint()
+
+	// Prepare the fifo.
+	out, err := RunFifoNew(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+	})
+	require.NoError(err)
+	respNew := &api.FifoNewResponse{}
+	require.NoError(json.Unmarshal([]byte(out), respNew))
+	t.Log("fifo uuid:", respNew.UUID)
+
+	// Get a ticket.
+	out, err = RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+		uuid:     respNew.UUID.String(),
+	})
+	require.NoError(err)
+	respTicket1 := &api.FifoTicketResponse{}
+	require.NoError(json.Unmarshal([]byte(out), respTicket1))
+	t.Log("ticket1 uuid:", respTicket1.TicketID)
+
+	// Get a second ticket.
+	out, err = RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+		uuid:     respNew.UUID.String(),
+	})
+	require.NoError(err)
+	respTicket2 := &api.FifoTicketResponse{}
+	require.NoError(json.Unmarshal([]byte(out), respTicket2))
+	t.Log("ticket2 uuid:", respTicket2.TicketID)
+
+	// Wait for the first ticket.
+	require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+		uuid:     respNew.UUID.String(),
+		ticketID: respTicket1.TicketID.String(),
+	}))
+	t.Log("ticket1 is ready")
+
+	// Now the resource is blocked.
+	// Additional clients can join waiting the ticket.
+
+	runWaitClient := func(wg *sync.WaitGroup, ticketID string) {
+		defer wg.Done()
+		require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+			endpoint: endpoint,
+			output:   "json",
+			uuid:     respNew.UUID.String(),
+			ticketID: ticketID,
+		}))
+	}
+
+	var wg1, wg2 sync.WaitGroup
+	n := 100
+	wg1.Add(n)
+	for i := 0; i < n; i++ {
+		go runWaitClient(&wg1, respTicket1.TicketID.String())
+	}
+	wg2.Add(n)
+	for i := 0; i < n; i++ {
+		go runWaitClient(&wg2, respTicket2.TicketID.String())
+	}
+
+	// Wait so that goroutines are started and blocking.
+	time.Sleep(100 * time.Millisecond)
+
+	// Now we can release the first ticket.
+	require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+		uuid:     respNew.UUID.String(),
+		ticketID: respTicket1.TicketID.String(),
+	}))
+	t.Log("ticket1 is done")
+
+	// All clients wating on the first ticket should be released.
+	wg1.Wait()
+	t.Log("all clients waiting on ticket1 are released")
+
+	// Now we can release the second ticket.
+	require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+		endpoint: endpoint,
+		output:   "json",
+		uuid:     respNew.UUID.String(),
+		ticketID: respTicket2.TicketID.String(),
+	}))
+	t.Log("ticket2 is done")
+
+	// All clients wating on the second ticket should be released.
+	wg2.Wait()
+	t.Log("all clients waiting on ticket2 are released")
+}
+
 func endpoint() string {
 	e := os.Getenv("E2E_ENDPOINT")
 	if e == "" {
