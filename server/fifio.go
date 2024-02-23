@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/list"
 	"log/slog"
 	"net/http"
 	"time"
@@ -175,24 +174,4 @@ func (s *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 
 	tick.doneC <- struct{}{}
 	log.Info("ticket done")
-}
-
-func searchTicket(tickets *list.List, tickID string) (*ticket, bool) {
-	_, t, ok := searchTicketElement(tickets, tickID)
-	return t, ok
-}
-
-func searchElement(l *list.List, id string) (*list.Element, bool) {
-	e, _, ok := searchTicketElement(l, id)
-	return e, ok
-}
-
-func searchTicketElement(l *list.List, id string) (*list.Element, *ticket, bool) {
-	for e := l.Front(); e != nil; e = e.Next() {
-		t := e.Value.(*ticket)
-		if t.TicketID.String() == id {
-			return e, t, true
-		}
-	}
-	return nil, nil, false
 }
