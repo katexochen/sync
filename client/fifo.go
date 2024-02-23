@@ -32,7 +32,7 @@ func newFifoNewCommand() *cobra.Command {
 		Use:   "new",
 		Short: "create a new first-in, first-out queue",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags, err := parseFlagsNew(cmd)
+			flags, err := parseFifoFlags(cmd)
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
@@ -47,7 +47,7 @@ func newFifoNewCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoNew(ctx context.Context, flags *flagsNew) (string, error) {
+func RunFifoNew(ctx context.Context, flags *FifoFlags) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", "new")
 	if err != nil {
 		return "", err
@@ -73,7 +73,7 @@ func newFifoTicketCommand() *cobra.Command {
 		Use:   "ticket",
 		Short: "request a ticket for the given fifo queue",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags, err := parseFlagsNew(cmd)
+			flags, err := parseFifoFlags(cmd)
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
@@ -89,7 +89,7 @@ func newFifoTicketCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoTicket(ctx context.Context, flags *flagsNew) (string, error) {
+func RunFifoTicket(ctx context.Context, flags *FifoFlags) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "ticket")
 	if err != nil {
 		return "", err
@@ -115,7 +115,7 @@ func newFifoWaitCommand() *cobra.Command {
 		Use:   "wait",
 		Short: "wait for the ticket to be called",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags, err := parseFlagsNew(cmd)
+			flags, err := parseFifoFlags(cmd)
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
@@ -129,7 +129,7 @@ func newFifoWaitCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoWait(ctx context.Context, flags *flagsNew) error {
+func RunFifoWait(ctx context.Context, flags *FifoFlags) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "wait", flags.ticketID)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func newFifoDoneCommand() *cobra.Command {
 		Use:   "done",
 		Short: "mark the ticket as done",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags, err := parseFlagsNew(cmd)
+			flags, err := parseFifoFlags(cmd)
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
@@ -157,7 +157,7 @@ func newFifoDoneCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoDone(ctx context.Context, flags *flagsNew) error {
+func RunFifoDone(ctx context.Context, flags *FifoFlags) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "done", flags.ticketID)
 	if err != nil {
 		return err
@@ -166,14 +166,14 @@ func RunFifoDone(ctx context.Context, flags *flagsNew) error {
 	return newHTTPClient().Get(ctx, url)
 }
 
-type flagsNew struct {
+type FifoFlags struct {
 	endpoint string
 	output   string
 	uuid     string
 	ticketID string
 }
 
-func parseFlagsNew(cmd *cobra.Command) (*flagsNew, error) {
+func parseFifoFlags(cmd *cobra.Command) (*FifoFlags, error) {
 	endpoint, err := cmd.Flags().GetString("endpoint")
 	if err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func parseFlagsNew(cmd *cobra.Command) (*flagsNew, error) {
 	uuid, _ := cmd.Flags().GetString("uuid")
 	ticketID, _ := cmd.Flags().GetString("ticket")
 
-	return &flagsNew{
+	return &FifoFlags{
 		endpoint: endpoint,
 		output:   output,
 		uuid:     uuid,
