@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,88 +31,96 @@ func newFifoNewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new",
 		Short: "create a new first-in, first-out queue",
-		RunE:  runFifoNew,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags, err := parseFlagsNew(cmd)
+			if err != nil {
+				return fmt.Errorf("parsing flags: %w", err)
+			}
+			out, err := RunFifoNew(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
 	}
 	return cmd
 }
 
-func runFifoNew(cmd *cobra.Command, _ []string) error {
-	flags, err := parseFlagsNew(cmd)
-	if err != nil {
-		return fmt.Errorf("parsing flags: %w", err)
-	}
-
+func RunFifoNew(ctx context.Context, flags *flagsNew) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", "new")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp := &api.FifoNewResponse{}
-	if err := newHTTPClient().RequestJSON(
-		cmd.Context(), url, http.NoBody, resp,
-	); err != nil {
-		return err
+	if err := newHTTPClient().RequestJSON(ctx, url, http.NoBody, resp); err != nil {
+		return "", err
 	}
 
 	if flags.output == "json" {
 		b, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
-			return err
+			return "", err
 		}
-		fmt.Println(string(b))
-	} else {
-		fmt.Println(resp.UUID)
+		return string(b), nil
 	}
-
-	return nil
+	return resp.UUID.String(), nil
 }
 
 func newFifoTicketCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ticket",
 		Short: "request a ticket for the given fifo queue",
-		RunE:  runFifoTicket,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags, err := parseFlagsNew(cmd)
+			if err != nil {
+				return fmt.Errorf("parsing flags: %w", err)
+			}
+			out, err := RunFifoTicket(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
 	}
 	cmd.Flags().StringP("uuid", "u", "", "uuid of the fifo queue")
 	return cmd
 }
 
-func runFifoTicket(cmd *cobra.Command, _ []string) error {
-	flags, err := parseFlagsNew(cmd)
-	if err != nil {
-		return fmt.Errorf("parsing flags: %w", err)
-	}
-
+func RunFifoTicket(ctx context.Context, flags *flagsNew) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "ticket")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp := &api.FifoTicketResponse{}
-	if err := newHTTPClient().RequestJSON(
-		cmd.Context(), url, http.NoBody, resp,
-	); err != nil {
-		return err
+	if err := newHTTPClient().RequestJSON(ctx, url, http.NoBody, resp); err != nil {
+		return "", err
 	}
 
 	if flags.output == "json" {
 		b, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
-			return err
+			return "", err
 		}
-		fmt.Println(string(b))
-	} else {
-		fmt.Println(resp.TicketID)
+		return string(b), nil
 	}
-
-	return nil
+	return resp.TicketID.String(), nil
 }
 
 func newFifoWaitCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
 		Short: "wait for the ticket to be called",
-		RunE:  runFifoWait,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags, err := parseFlagsNew(cmd)
+			if err != nil {
+				return fmt.Errorf("parsing flags: %w", err)
+			}
+			return RunFifoWait(cmd.Context(), flags)
+		},
 	}
 	cmd.Flags().StringP("uuid", "u", "", "uuid of the fifo queue")
 	must(cmd.MarkFlagRequired("uuid"))
@@ -120,25 +129,26 @@ func newFifoWaitCommand() *cobra.Command {
 	return cmd
 }
 
-func runFifoWait(cmd *cobra.Command, args []string) error {
-	flags, err := parseFlagsNew(cmd)
-	if err != nil {
-		return fmt.Errorf("parsing flags: %w", err)
-	}
-
+func RunFifoWait(ctx context.Context, flags *flagsNew) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "wait", flags.ticketID)
 	if err != nil {
 		return err
 	}
 
-	return newHTTPClient().Get(cmd.Context(), url)
+	return newHTTPClient().Get(ctx, url)
 }
 
 func newFifoDoneCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "done",
 		Short: "mark the ticket as done",
-		RunE:  runFifoDone,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags, err := parseFlagsNew(cmd)
+			if err != nil {
+				return fmt.Errorf("parsing flags: %w", err)
+			}
+			return RunFifoDone(cmd.Context(), flags)
+		},
 	}
 	cmd.Flags().StringP("uuid", "u", "", "uuid of the fifo queue")
 	must(cmd.MarkFlagRequired("uuid"))
@@ -147,18 +157,13 @@ func newFifoDoneCommand() *cobra.Command {
 	return cmd
 }
 
-func runFifoDone(cmd *cobra.Command, args []string) error {
-	flags, err := parseFlagsNew(cmd)
-	if err != nil {
-		return fmt.Errorf("parsing flags: %w", err)
-	}
-
+func RunFifoDone(ctx context.Context, flags *flagsNew) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "done", flags.ticketID)
 	if err != nil {
 		return err
 	}
 
-	return newHTTPClient().Get(cmd.Context(), url)
+	return newHTTPClient().Get(ctx, url)
 }
 
 type flagsNew struct {
