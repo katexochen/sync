@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -39,7 +38,7 @@ func (s *mutexManager) new(w http.ResponseWriter, r *http.Request) {
 	log := s.log.WithGroup("new").With("uuid", uuid)
 	log.Info("called")
 	s.mutexes.Put(uuid, &mutex{})
-	writeJSON(w, newMutexResponse{UUID: uuid})
+	encode(w, 200, newMutexResponse{UUID: uuid})
 }
 
 func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +57,7 @@ func (s *mutexManager) lock(w http.ResponseWriter, r *http.Request) {
 	m.Lock()
 	m.nonce = nonce
 	log.Info("locked", "nonce", nonce)
-	writeJSON(w, lockMutexResponse{Nonce: nonce})
+	encode(w, 200, lockMutexResponse{Nonce: nonce})
 }
 
 func (s *mutexManager) unlock(w http.ResponseWriter, r *http.Request) {
@@ -104,12 +103,6 @@ type (
 		Nonce string `json:"nonce"`
 	}
 )
-
-func writeJSON(w http.ResponseWriter, resp any) {
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
 
 func newNonce() string {
 	return uuid.New().String()

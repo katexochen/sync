@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -127,7 +129,7 @@ func (s *fifoManager) new(w http.ResponseWriter, r *http.Request) {
 	log.Info("called")
 	fifo.start()
 	s.fifos.Put(fifo.uuid.String(), fifo)
-	writeJSON(w, api.FifoNewResponse{UUID: fifo.uuid})
+	encode(w, 200, api.FifoNewResponse{UUID: fifo.uuid})
 }
 
 func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +149,7 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 	fifo.ticketLookup.Put(tick.TicketID.String(), tick)
 	fifo.ticketQueue <- tick
 
-	writeJSON(w, tick)
+	encode(w, 200, tick)
 }
 
 func (s *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
@@ -198,4 +200,13 @@ func (s *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 
 	tick.doneC <- struct{}{}
 	log.Info("ticket done")
+}
+
+func encode[T any](w http.ResponseWriter, status int, v T) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		return fmt.Errorf("encode json: %w", err)
+	}
+	return nil
 }

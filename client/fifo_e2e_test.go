@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"os"
 	"sync"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/katexochen/sync/api"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,8 +25,8 @@ func TestFifoBasics(t *testing.T) {
 			output:   "json",
 		})
 		require.NoError(err)
-		resp := &api.FifoNewResponse{}
-		require.NoError(json.Unmarshal([]byte(out), resp))
+		resp, err := decode[api.FifoNewResponse](out)
+		require.NoError(err)
 		uuid = resp.UUID.String()
 	})
 	t.Run("ticket", func(t *testing.T) {
@@ -37,8 +37,8 @@ func TestFifoBasics(t *testing.T) {
 			uuid:     uuid,
 		})
 		require.NoError(err)
-		resp := &api.FifoTicketResponse{}
-		require.NoError(json.Unmarshal([]byte(out), resp))
+		resp, err := decode[api.FifoTicketResponse](out)
+		require.NoError(err)
 		ticket = resp.TicketID.String()
 	})
 	t.Run("wait", func(t *testing.T) {
@@ -62,7 +62,6 @@ func TestFifoBasics(t *testing.T) {
 }
 
 func TestFifoConcurrent100(t *testing.T) {
-	assert := assert.New(t)
 	require := require.New(t)
 	ctx := context.Background()
 	endpoint := endpoint()
@@ -82,8 +81,8 @@ func TestFifoConcurrent100(t *testing.T) {
 		output:   "json",
 	})
 	require.NoError(err)
-	respNew := &api.FifoNewResponse{}
-	require.NoError(json.Unmarshal([]byte(out), respNew))
+	respNew, err := decode[api.FifoNewResponse](out)
+	require.NoError(err)
 
 	runRandomClient := func(wg *sync.WaitGroup) {
 		defer wg.Done()
@@ -95,11 +94,11 @@ func TestFifoConcurrent100(t *testing.T) {
 			output:   "json",
 			uuid:     respNew.UUID.String(),
 		})
-		assert.NoError(err)
-		respTicket := &api.FifoTicketResponse{}
-		assert.NoError(json.Unmarshal([]byte(out), respTicket))
+		require.NoError(err)
+		respTicket, err := decode[api.FifoTicketResponse](out)
+		require.NoError(err)
 
-		assert.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -108,7 +107,7 @@ func TestFifoConcurrent100(t *testing.T) {
 
 		assertResourceExclusive()
 
-		assert.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -136,8 +135,8 @@ func TestFifo100Waiting(t *testing.T) {
 		output:   "json",
 	})
 	require.NoError(err)
-	respNew := &api.FifoNewResponse{}
-	require.NoError(json.Unmarshal([]byte(out), respNew))
+	respNew, err := decode[api.FifoNewResponse](out)
+	require.NoError(err)
 	t.Log("fifo uuid:", respNew.UUID)
 
 	// Get a ticket.
@@ -147,8 +146,8 @@ func TestFifo100Waiting(t *testing.T) {
 		uuid:     respNew.UUID.String(),
 	})
 	require.NoError(err)
-	respTicket1 := &api.FifoTicketResponse{}
-	require.NoError(json.Unmarshal([]byte(out), respTicket1))
+	respTicket1, err := decode[api.FifoTicketResponse](out)
+	require.NoError(err)
 	t.Log("ticket1 uuid:", respTicket1.TicketID)
 
 	// Get a second ticket.
@@ -158,8 +157,8 @@ func TestFifo100Waiting(t *testing.T) {
 		uuid:     respNew.UUID.String(),
 	})
 	require.NoError(err)
-	respTicket2 := &api.FifoTicketResponse{}
-	require.NoError(json.Unmarshal([]byte(out), respTicket2))
+	respTicket2, err := decode[api.FifoTicketResponse](out)
+	require.NoError(err)
 	t.Log("ticket2 uuid:", respTicket2.TicketID)
 
 	// Wait for the first ticket.
@@ -231,4 +230,12 @@ func endpoint() string {
 		e = "http://localhost:8080"
 	}
 	return e
+}
+
+func decode[T any](s string) (T, error) {
+	var v T
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return v, fmt.Errorf("unmarshal json: %w", err)
+	}
+	return v, nil
 }
