@@ -10,34 +10,42 @@ import (
 	ihttp "github.com/katexochen/sync/internal/http"
 )
 
-type FiFo struct {
+type Fifo struct {
 	endpoint   string
 	client     *ihttp.Client
 	fifoUUID   string
 	ticketUUID string
 }
 
-func NewFiFo(endpoint string) *FiFo {
-	return &FiFo{
+func NewFifo(ctx context.Context, endpoint string) (*Fifo, error) {
+	f := &Fifo{
 		endpoint: endpoint,
 		client:   ihttp.NewClient(),
 	}
-}
 
-func (f *FiFo) New(ctx context.Context) error {
-	url, err := urlJoin(f.endpoint, "fifo", "new")
+	url, err := urlJoin(endpoint, "fifo", "new")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp := &api.FifoNewResponse{}
 	if err := f.client.RequestJSON(ctx, url, http.NoBody, resp); err != nil {
-		return err
+		return nil, err
 	}
+
 	f.fifoUUID = resp.UUID.String()
-	return nil
+	return f, nil
 }
 
-func (f *FiFo) Ticket(ctx context.Context) error {
+func FifoFromUUID(endpoint, uuid string) *Fifo {
+	f := &Fifo{
+		endpoint: endpoint,
+		client:   ihttp.NewClient(),
+		fifoUUID: uuid,
+	}
+	return f
+}
+
+func (f *Fifo) Ticket(ctx context.Context) error {
 	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "ticket")
 	if err != nil {
 		return err
@@ -50,7 +58,7 @@ func (f *FiFo) Ticket(ctx context.Context) error {
 	return nil
 }
 
-func (f *FiFo) Wait(ctx context.Context) error {
+func (f *Fifo) Wait(ctx context.Context) error {
 	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "wait", f.ticketUUID)
 	if err != nil {
 		return err
@@ -58,14 +66,14 @@ func (f *FiFo) Wait(ctx context.Context) error {
 	return f.client.Get(ctx, url)
 }
 
-func (f *FiFo) TicketAndWait(ctx context.Context) error {
+func (f *Fifo) TicketAndWait(ctx context.Context) error {
 	if err := f.Ticket(ctx); err != nil {
 		return err
 	}
 	return f.Wait(ctx)
 }
 
-func (f *FiFo) Done(ctx context.Context) error {
+func (f *Fifo) Done(ctx context.Context) error {
 	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "done", f.ticketUUID)
 	if err != nil {
 		return err
