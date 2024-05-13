@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/katexochen/sync/api"
+	ihttp "github.com/katexochen/sync/internal/http"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,7 @@ func TestFifoBasics(t *testing.T) {
 	var uuid, ticket string
 	t.Run("new", func(t *testing.T) {
 		require := require.New(t)
-		out, err := RunFifoNew(ctx, newHTTPClient(), &FifoFlags{
+		out, err := RunFifoNew(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 		})
@@ -31,7 +32,7 @@ func TestFifoBasics(t *testing.T) {
 	})
 	t.Run("ticket", func(t *testing.T) {
 		require := require.New(t)
-		out, err := RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+		out, err := RunFifoTicket(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     uuid,
@@ -43,7 +44,7 @@ func TestFifoBasics(t *testing.T) {
 	})
 	t.Run("wait", func(t *testing.T) {
 		require := require.New(t)
-		require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoWait(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     uuid,
@@ -52,7 +53,7 @@ func TestFifoBasics(t *testing.T) {
 	})
 	t.Run("done", func(t *testing.T) {
 		require := require.New(t)
-		require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoDone(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     uuid,
@@ -76,7 +77,7 @@ func TestFifoConcurrent100(t *testing.T) {
 	}
 
 	// Prepare the fifo
-	out, err := RunFifoNew(ctx, newHTTPClient(), &FifoFlags{
+	out, err := RunFifoNew(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 	})
@@ -89,7 +90,7 @@ func TestFifoConcurrent100(t *testing.T) {
 
 		time.Sleep(time.Duration(rand.Intn(3000)) * time.Millisecond)
 
-		out, err := RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+		out, err := RunFifoTicket(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -98,7 +99,7 @@ func TestFifoConcurrent100(t *testing.T) {
 		respTicket, err := decode[api.FifoTicketResponse](out)
 		require.NoError(err)
 
-		require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoWait(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -107,7 +108,7 @@ func TestFifoConcurrent100(t *testing.T) {
 
 		assertResourceExclusive()
 
-		require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoDone(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -130,7 +131,7 @@ func TestFifo100Waiting(t *testing.T) {
 	endpoint := endpoint()
 
 	// Prepare the fifo.
-	out, err := RunFifoNew(ctx, newHTTPClient(), &FifoFlags{
+	out, err := RunFifoNew(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 	})
@@ -140,7 +141,7 @@ func TestFifo100Waiting(t *testing.T) {
 	t.Log("fifo uuid:", respNew.UUID)
 
 	// Get a ticket.
-	out, err = RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+	out, err = RunFifoTicket(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 		uuid:     respNew.UUID.String(),
@@ -151,7 +152,7 @@ func TestFifo100Waiting(t *testing.T) {
 	t.Log("ticket1 uuid:", respTicket1.TicketID)
 
 	// Get a second ticket.
-	out, err = RunFifoTicket(ctx, newHTTPClient(), &FifoFlags{
+	out, err = RunFifoTicket(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 		uuid:     respNew.UUID.String(),
@@ -162,7 +163,7 @@ func TestFifo100Waiting(t *testing.T) {
 	t.Log("ticket2 uuid:", respTicket2.TicketID)
 
 	// Wait for the first ticket.
-	require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+	require.NoError(RunFifoWait(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 		uuid:     respNew.UUID.String(),
@@ -175,7 +176,7 @@ func TestFifo100Waiting(t *testing.T) {
 
 	runWaitClient := func(wg *sync.WaitGroup, ticketID string) {
 		defer wg.Done()
-		require.NoError(RunFifoWait(ctx, newHTTPClient(), &FifoFlags{
+		require.NoError(RunFifoWait(ctx, ihttp.NewClient(), &FifoFlags{
 			endpoint: endpoint,
 			output:   "json",
 			uuid:     respNew.UUID.String(),
@@ -198,7 +199,7 @@ func TestFifo100Waiting(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Now we can release the first ticket.
-	require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+	require.NoError(RunFifoDone(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 		uuid:     respNew.UUID.String(),
@@ -211,7 +212,7 @@ func TestFifo100Waiting(t *testing.T) {
 	t.Log("all clients waiting on ticket1 are released")
 
 	// Now we can release the second ticket.
-	require.NoError(RunFifoDone(ctx, newHTTPClient(), &FifoFlags{
+	require.NoError(RunFifoDone(ctx, ihttp.NewClient(), &FifoFlags{
 		endpoint: endpoint,
 		output:   "json",
 		uuid:     respNew.UUID.String(),

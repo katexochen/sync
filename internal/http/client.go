@@ -1,4 +1,4 @@
-package main
+package http
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-type httpClient struct {
+type Client struct {
 	c *http.Client
 }
 
@@ -20,20 +20,20 @@ func (e *httpStatusCodeError) Error() string {
 	return fmt.Sprintf("status code %d", e.StatusCode)
 }
 
-func newHTTPClient() *httpClient {
-	return &httpClient{
+func NewClient() *Client {
+	return &Client{
 		c: &http.Client{},
 	}
 }
 
-func (c *httpClient) RequestJSON(ctx context.Context, url string, body, resp any) error {
+func (c *Client) RequestJSON(ctx context.Context, url string, body, resp any) error {
 	if body == http.NoBody {
 		return c.GetJSON(ctx, url, resp)
 	}
 	return c.PostJSON(ctx, url, body, resp)
 }
 
-func (c *httpClient) Get(ctx context.Context, url string) error {
+func (c *Client) Get(ctx context.Context, url string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -49,7 +49,7 @@ func (c *httpClient) Get(ctx context.Context, url string) error {
 	return nil
 }
 
-func (c *httpClient) GetJSON(ctx context.Context, url string, resp any) error {
+func (c *Client) GetJSON(ctx context.Context, url string, resp any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -68,7 +68,7 @@ func (c *httpClient) GetJSON(ctx context.Context, url string, resp any) error {
 	return nil
 }
 
-func (c *httpClient) PostJSON(ctx context.Context, url string, body, resp any) error {
+func (c *Client) PostJSON(ctx context.Context, url string, body, resp any) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshaling request body: %w", err)

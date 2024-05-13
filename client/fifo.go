@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"github.com/katexochen/sync/api"
+	ihttp "github.com/katexochen/sync/internal/http"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +37,7 @@ func newFifoNewCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
-			out, err := RunFifoNew(cmd.Context(), newHTTPClient(), flags)
+			out, err := RunFifoNew(cmd.Context(), ihttp.NewClient(), flags)
 			if err != nil {
 				return err
 			}
@@ -47,7 +48,7 @@ func newFifoNewCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoNew(ctx context.Context, client *httpClient, flags *FifoFlags) (string, error) {
+func RunFifoNew(ctx context.Context, client *ihttp.Client, flags *FifoFlags) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", "new")
 	if err != nil {
 		return "", err
@@ -77,7 +78,7 @@ func newFifoTicketCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
-			out, err := RunFifoTicket(cmd.Context(), newHTTPClient(), flags)
+			out, err := RunFifoTicket(cmd.Context(), ihttp.NewClient(), flags)
 			if err != nil {
 				return err
 			}
@@ -89,7 +90,7 @@ func newFifoTicketCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoTicket(ctx context.Context, client *httpClient, flags *FifoFlags) (string, error) {
+func RunFifoTicket(ctx context.Context, client *ihttp.Client, flags *FifoFlags) (string, error) {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "ticket")
 	if err != nil {
 		return "", err
@@ -119,7 +120,7 @@ func newFifoWaitCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
-			return RunFifoWait(cmd.Context(), newHTTPClient(), flags)
+			return RunFifoWait(cmd.Context(), ihttp.NewClient(), flags)
 		},
 	}
 	cmd.Flags().StringP("uuid", "u", "", "uuid of the fifo queue")
@@ -129,7 +130,7 @@ func newFifoWaitCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoWait(ctx context.Context, client *httpClient, flags *FifoFlags) error {
+func RunFifoWait(ctx context.Context, client *ihttp.Client, flags *FifoFlags) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "wait", flags.ticketID)
 	if err != nil {
 		return err
@@ -147,7 +148,7 @@ func newFifoDoneCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parsing flags: %w", err)
 			}
-			return RunFifoDone(cmd.Context(), newHTTPClient(), flags)
+			return RunFifoDone(cmd.Context(), ihttp.NewClient(), flags)
 		},
 	}
 	cmd.Flags().StringP("uuid", "u", "", "uuid of the fifo queue")
@@ -157,7 +158,7 @@ func newFifoDoneCommand() *cobra.Command {
 	return cmd
 }
 
-func RunFifoDone(ctx context.Context, client *httpClient, flags *FifoFlags) error {
+func RunFifoDone(ctx context.Context, client *ihttp.Client, flags *FifoFlags) error {
 	url, err := urlJoin(flags.endpoint, "fifo", flags.uuid, "done", flags.ticketID)
 	if err != nil {
 		return err
