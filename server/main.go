@@ -11,8 +11,6 @@ func main() {
 	log.Info("started")
 
 	mux := http.NewServeMux()
-	mm := newMutexManager(log)
-	mm.registerHandlers(mux, "/mutex")
 	fm := newFifoManager(log)
 	fm.registerHandlers(mux, "/fifo")
 

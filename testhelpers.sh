@@ -2,24 +2,6 @@
 
 export URL="http://localhost:8080"
 
-function newMutex() {
-    UUID=$(curl -fsS $URL/mutex/new | jq -r '.uuid')
-    export UUID
-}
-
-function lockMutex() {
-    NONCE=$(curl -fsS "$URL/mutex/$UUID/lock" | jq -r '.nonce')
-    export NONCE
-}
-
-function unlockMutex() {
-    curl -fsSL "$URL/mutex/$UUID/unlock/$NONCE"
-}
-
-function deleteMutex() {
-    curl -fsSL "$URL/mutex/$UUID"
-}
-
 function newFifo() {
     UUID=$(curl -fsS $URL/fifo/new | jq -r '.uuid')
     export UUID

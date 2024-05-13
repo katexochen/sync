@@ -55,7 +55,6 @@
           gotools
           gopls
         ];
-        shellHook = ''alias make=just'';
       };
     });
 }
