@@ -23,6 +23,8 @@ type ticket struct {
 	waitAckOnce sync.Once
 	// doneC is closed to notify the fifo that the ticket is done.
 	doneC chan struct{}
+	// doneTimeout is the maximum time to wait for the ticket to be done.
+	doneTimeout time.Duration
 }
 
 func (t *ticket) waitAck() {
@@ -31,12 +33,13 @@ func (t *ticket) waitAck() {
 	})
 }
 
-func newTicket() *ticket {
+func newTicket(doneTimeout time.Duration) *ticket {
 	return &ticket{
 		FifoTicketResponse: api.FifoTicketResponse{TicketID: uuidlib.New()},
 		waitC:              make(chan struct{}),
 		waitAckC:           make(chan struct{}),
 		doneC:              make(chan struct{}),
+		doneTimeout:        doneTimeout,
 	}
 }
 
@@ -92,7 +95,7 @@ func (f *fifo) start() {
 
 			// Wait for the ticket to be done.
 			select {
-			case <-time.After(f.doneTimeout):
+			case <-time.After(t.doneTimeout):
 				f.log.Warn("timeout waiting for ticket completion", "ticket", t.TicketID)
 			case <-t.doneC:
 				f.log.Info("ticket completed", "ticket", t.TicketID)
@@ -144,7 +147,20 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tick := newTicket()
+	doneTimeout := fifo.doneTimeout
+	doneTimeoutStr := r.URL.Query().Get("done_timeout")
+	if doneTimeoutStr != "" {
+		var err error
+		doneTimeout, err = time.ParseDuration(doneTimeoutStr)
+		if err != nil {
+			log.Warn("invalid done_timeout", "err", err)
+			http.Error(w, "invalid done_timeout", http.StatusBadRequest)
+			return
+		}
+		log.Info("using custom done_timeout", "done_timeout", doneTimeout)
+	}
+
+	tick := newTicket(doneTimeout)
 	log.Info("ticket created", "ticket", tick.TicketID)
 	fifo.ticketLookup.Put(tick.TicketID.String(), tick)
 	fifo.ticketQueue <- tick
