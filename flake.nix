@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:katexochen/nixpkgs/gotools/go122";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -18,18 +18,15 @@
       in
       {
         packages = rec {
-          sync-server = pkgs.buildGo122Module {
+          sync-server = pkgs.buildGoModule {
             pname = "sync-server";
             version = "0.0.1";
-            src = ./.;
+            src = lib.cleanSource ./.;
             proxyVendor = true;
             vendorHash = "sha256-XQTpAcL9Aatk58QIClbdgbuDQRJpN83PjhYWHm+AuCA=";
             subPackages = [ "server" ];
             CGO_ENABLED = "0";
-            ldflags = [
-              "-s"
-              "-w"
-            ];
+            ldflags = [ "-s" ];
             meta.mainProgram = "server";
           };
           sync-server-container = pkgs.dockerTools.buildImage {
@@ -58,7 +55,7 @@
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            go_1_22
+            go
             golangci-lint
             gotools
             gopls
