@@ -23,9 +23,8 @@
             version = "0.0.1";
             src = lib.cleanSource ./.;
             proxyVendor = true;
-            vendorHash = "sha256-XQTpAcL9Aatk58QIClbdgbuDQRJpN83PjhYWHm+AuCA=";
+            vendorHash = "sha256-PKjZug1YckfOoaCSz4ENZghtgxHfoqZoDqV02SvoKOg=";
             subPackages = [ "server" ];
-            CGO_ENABLED = "0";
             ldflags = [ "-s" ];
             meta.mainProgram = "server";
           };
@@ -59,6 +58,7 @@
             golangci-lint
             gotools
             gopls
+            sqlite
           ];
         };
       }
