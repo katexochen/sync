@@ -5,56 +5,65 @@
   };
 
   outputs =
-    { self
-    , nixpkgs
-    , flake-utils
-    }:
-    flake-utils.lib.eachDefaultSystem (system:
-    let
-      pkgs = import nixpkgs { inherit system; };
-      lib = pkgs.lib;
-    in
     {
-      packages = rec {
-        sync-server = pkgs.buildGo122Module rec {
-          pname = "sync-server";
-          version = "0.0.1";
-          src = ./.;
-          proxyVendor = true;
-          vendorHash = "sha256-XQTpAcL9Aatk58QIClbdgbuDQRJpN83PjhYWHm+AuCA=";
-          subPackages = [ "server" ];
-          CGO_ENABLED = "0";
-          ldflags = [ "-s" "-w" ];
-          meta.mainProgram = "server";
-        };
-        sync-server-container = pkgs.dockerTools.buildImage {
-          name = "sync-server";
-          tag = "v${sync-server.version}";
-          copyToRoot = with pkgs.dockerTools; [ caCertificates ];
-          config = {
-            Cmd = [ "${lib.getExe sync-server}" ];
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        lib = pkgs.lib;
+      in
+      {
+        packages = rec {
+          sync-server = pkgs.buildGo122Module {
+            pname = "sync-server";
+            version = "0.0.1";
+            src = ./.;
+            proxyVendor = true;
+            vendorHash = "sha256-XQTpAcL9Aatk58QIClbdgbuDQRJpN83PjhYWHm+AuCA=";
+            subPackages = [ "server" ];
+            CGO_ENABLED = "0";
+            ldflags = [
+              "-s"
+              "-w"
+            ];
+            meta.mainProgram = "server";
+          };
+          sync-server-container = pkgs.dockerTools.buildImage {
+            name = "sync-server";
+            tag = "v${sync-server.version}";
+            copyToRoot = with pkgs.dockerTools; [ caCertificates ];
+            config = {
+              Cmd = [ "${lib.getExe sync-server}" ];
+            };
+          };
+          push-sync-server-container = pkgs.writeShellApplication {
+            name = "push-sync-server-container";
+            runtimeInputs = with pkgs; [
+              crane
+              gzip
+            ];
+            text = ''
+              imageName="$1"
+              tmpdir=$(mktemp -d)
+              trap 'rm -rf $tmpdir' EXIT
+              gunzip < "${sync-server-container}" > "$tmpdir/image.tar"
+              crane push "$tmpdir/image.tar" "$imageName:${sync-server-container.imageTag}"
+            '';
           };
         };
-        push-sync-server-container = pkgs.writeShellApplication {
-          name = "push-sync-server-container";
-          runtimeInputs = with pkgs; [ crane gzip ];
-          text = ''
-            imageName="$1"
-            tmpdir=$(mktemp -d)
-            trap 'rm -rf $tmpdir' EXIT
-            gunzip < "${sync-server-container}" > "$tmpdir/image.tar"
-            crane push "$tmpdir/image.tar" "$imageName:${sync-server-container.imageTag}"
-          '';
-        };
-      };
 
-      devShells.default = pkgs.mkShell {
-        packages = with pkgs; [
-          go_1_22
-          golangci-lint
-          gotools
-          gopls
-        ];
-      };
-    });
+        devShells.default = pkgs.mkShell {
+          packages = with pkgs; [
+            go_1_22
+            golangci-lint
+            gotools
+            gopls
+          ];
+        };
+      }
+    );
 }
