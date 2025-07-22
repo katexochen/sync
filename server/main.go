@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func main() {
@@ -19,6 +20,7 @@ func main() {
 		log.Error("fatal", "err", fmt.Errorf("open sqlite: %w", err))
 		os.Exit(1)
 	}
+	db.Logger = db.Logger.LogMode(gormlogger.Info)
 
 	mux := http.NewServeMux()
 	fm := newFifoManager(db, log)
