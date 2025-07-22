@@ -50,6 +50,7 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 		if err := m.db.Order("created_at ASC").
 			Where(&ticket{FifoUUID: fifoUUID}, "FifoUUID", "DoneAt").
 			Limit(2).
+			Preload("Fifo").
 			Find(&tickets).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("no active ticket found for fifo %s", fifoUUID.String())
 		} else if err != nil {
@@ -58,7 +59,7 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 		if len(tickets) == 0 {
 			return nil
 		}
-		if tickets[0].NotifiedAt != nil && time.Now().After(tickets[0].CreatedAt.Add(tickets[0].Fifo.AcceptTimeout)) {
+		if tickets[0].NotifiedAt != nil && time.Now().After(tickets[0].NotifiedAt.Add(tickets[0].Fifo.AcceptTimeout)) {
 			m.removeWaiter(tickets[0].UUID)
 			if err := m.db.Delete(&tickets[0]).Error; err != nil {
 				m.log.Error("db delete failed", "err", err)
@@ -202,8 +203,8 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tick := &ticket{
-		UUID: uuidlib.New(),
-		Fifo: fifo,
+		UUID:     uuidlib.New(),
+		FifoUUID: fifoUUID,
 	}
 
 	if err := s.db.Create(tick).Error; err != nil {
@@ -211,7 +212,7 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db create failed", http.StatusInternalServerError)
 		return
 	}
-	if err := s.updateTicketQueue(fifo.UUID); err != nil {
+	if err := s.updateTicketQueue(fifoUUID); err != nil {
 		log.Error("get active ticket failed", "err", err)
 		http.Error(w, "get active ticket failed", http.StatusInternalServerError)
 		return
@@ -222,7 +223,7 @@ func (s *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
-	fifoUUIDStr := r.PathValue("uuid")
+	fifoUUIDStr := r.PathValue("uuid") // TODO: we don't actually need the fifo UUID here
 	tickUUIDStr := r.PathValue("ticket")
 	log := s.log.With("call", "wait", "fifo", fifoUUIDStr, "ticket", tickUUIDStr)
 	log.Info("called")
