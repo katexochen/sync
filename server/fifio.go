@@ -114,9 +114,8 @@ func (m *fifoManager) getOrCreateWaiter(uuid uuidlib.UUID) chan struct{} {
 func (m *fifoManager) run() {
 	go func() {
 		for {
-			select {
-			case <-time.After(time.Second):
-			}
+			<-time.After(time.Second)
+
 			// get all tickets that are neither done nor notified
 			var openTickets []ticket
 			if err := m.db.Where("done_at IS NULL AND notified_at IS NULL").Find(&openTickets).Error; errors.Is(err, gorm.ErrRecordNotFound) {

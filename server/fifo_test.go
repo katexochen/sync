@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,13 +26,13 @@ func newMockDB() (*gorm.DB, sqlmock.Sqlmock, error) {
 
 	mock.ExpectQuery("select sqlite_version\\(\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"sqlite_version()"}).AddRow("1.2.3"))
-
 	gormDB, err := gorm.Open(sqlite.New(sqlite.Config{Conn: db}))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	mock.ExpectExec("PRAGMA foreign_keys=ON").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("PRAGMA foreign_keys=ON").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := gormDB.Exec("PRAGMA foreign_keys=ON").Error; err != nil {
 		return nil, nil, err
 	}
@@ -67,9 +68,8 @@ func TestNewFifo(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	req := httptest.NewRequest(http.MethodGet, "/fifos", nil)
+	req := httptest.NewRequest(http.MethodGet, "/fifo/new", http.NoBody)
 	rec := httptest.NewRecorder()
-
 	mgr.new(rec, req)
 
 	resp := rec.Result()
@@ -79,7 +79,10 @@ func TestNewFifo(t *testing.T) {
 	require.NoError(err)
 
 	require.Equal(http.StatusOK, resp.StatusCode)
-	require.NoError(json.Unmarshal(body, &api.FifoNewResponse{}))
+	fifoResp := &api.FifoNewResponse{}
+	require.NoError(json.Unmarshal(body, fifoResp))
+	require.NotEmpty(fifoResp.UUID)
+	require.NoError(mock.ExpectationsWereMet())
 }
 
 func TestTicket(t *testing.T) {
@@ -160,29 +163,26 @@ func TestWait(t *testing.T) {
 	mux := http.NewServeMux()
 	mgr.registerHandlers(mux)
 
-	wait := make(chan struct{})
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		mux.ServeHTTP(rec, req)
-		close(wait)
 	}()
 
 	require.Eventually(func() bool {
+		mgr.waitersMux.RLock()
+		defer mgr.waitersMux.RUnlock()
 		ch, ok := mgr.waiters[ticketUUID]
 		if ok {
 			close(ch)
 			return true
 		}
 		return false
-	}, 2*time.Second, 100*time.Millisecond)
+	}, 200*time.Millisecond, 40*time.Millisecond)
 
-	require.Eventually(func() bool {
-		select {
-		case <-wait:
-			return true
-		default:
-			return false
-		}
-	}, 2*time.Second, 100*time.Millisecond)
+	wg.Wait()
 
 	require.NoError(mock.ExpectationsWereMet())
 
