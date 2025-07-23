@@ -236,7 +236,7 @@ func (s *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tick := &ticket{UUID: tickUUID}
-	if err := s.db.Preload("Fifo").First(tick).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := s.db.First(tick).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		log.Warn("ticket not found")
 		http.Error(w, "ticket not found", http.StatusNotFound)
 		return
@@ -265,10 +265,19 @@ func (s *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	tick.AcceptedAt = &now
-	if err := s.db.Save(tick).Error; err != nil {
-		log.Error("db save failed", "err", err)
-		http.Error(w, "db save failed", http.StatusInternalServerError)
+	rowsAffected, err := gorm.G[ticket](s.db).
+		Where("accepted_at = ?", nil).
+		Select("AcceptedAt").
+		Updates(r.Context(), *tick)
+	if err != nil {
+		log.Error("updating accepted_at failed", "err", err)
+		http.Error(w, "updating accepted_at failed", http.StatusInternalServerError)
 		return
+	}
+	if rowsAffected == 0 {
+		log.Info("ticket was already accepted")
+	} else {
+		log.Info("ticket accepted")
 	}
 }
 
