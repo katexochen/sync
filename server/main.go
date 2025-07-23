@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
@@ -15,12 +13,11 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	log.Info("started")
 
-	db, err := gorm.Open(sqlite.Open("state"), &gorm.Config{})
+	db, err := newSqliteDB("state", gormlogger.Info)
 	if err != nil {
-		log.Error("fatal", "err", fmt.Errorf("open sqlite: %w", err))
+		log.Error("fatal", "err", fmt.Errorf("opening sqlite database: %w", err))
 		os.Exit(1)
 	}
-	db.Logger = db.Logger.LogMode(gormlogger.Info)
 
 	mux := http.NewServeMux()
 	fm := newFifoManager(db, log)
