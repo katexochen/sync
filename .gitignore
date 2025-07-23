@@ -2,3 +2,4 @@
 server/server
 client/client
 result*
+server/state
