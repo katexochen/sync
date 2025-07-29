@@ -6,12 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	uuidlib "github.com/google/uuid"
 	"github.com/katexochen/sync/api"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -28,12 +26,6 @@ func newMockDB() (*gorm.DB, sqlmock.Sqlmock, error) {
 		WillReturnRows(sqlmock.NewRows([]string{"sqlite_version()"}).AddRow("1.2.3"))
 	gormDB, err := gorm.Open(sqlite.New(sqlite.Config{Conn: db}))
 	if err != nil {
-		return nil, nil, err
-	}
-
-	mock.ExpectExec("PRAGMA foreign_keys=ON").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	if err := gormDB.Exec("PRAGMA foreign_keys=ON").Error; err != nil {
 		return nil, nil, err
 	}
 
@@ -93,11 +85,11 @@ func TestTicket(t *testing.T) {
 
 	mgr := newTestFifoManager(t, gormDB, mock)
 
-	fifoUUIDStr := "00000000-0000-0000-0000-000000000000"
-	ticketUUIDStr := "11111111-1111-1111-1111-111111111111"
+	fifoUUIDStr := "11111111-1111-1111-1111-111111111111"
+	ticketUUIDStr := "22222222-2222-2222-2222-222222222222"
 
 	// Parse fifo UUID from the request
-	mock.ExpectQuery("SELECT \\* FROM `fifos` ORDER BY `fifos`.`uuid` LIMIT 1").
+	mock.ExpectQuery("SELECT \\* FROM `fifos` WHERE `fifos`.`uuid` = \\? ORDER BY `fifos`.`uuid` LIMIT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"uuid"}).AddRow(fifoUUIDStr))
 
 	// Create a new ticket
@@ -106,7 +98,22 @@ func TestTicket(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	expectUpdateTicketQueue(mock, fifoUUIDStr, ticketUUIDStr)
+	// Update the ticket queue
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `tickets` WHERE `tickets`.`fifo_uuid` = \\? ORDER BY created_at ASC LIMIT 2").
+		WithArgs(fifoUUIDStr).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "fifo_uuid"}).AddRow(ticketUUIDStr, fifoUUIDStr))
+	// Get fifo details from preload
+	mock.ExpectQuery("SELECT \\* FROM `fifos` WHERE `fifos`.`uuid` = \\?").
+		WithArgs(fifoUUIDStr).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid"}).AddRow(fifoUUIDStr))
+	mock.ExpectBegin()
+	// Mark the ticket as notified
+	mock.ExpectExec("UPDATE `tickets` SET `notified_at`=\\? WHERE `uuid` = \\?").
+		WithArgs(sqlmock.AnyArg(), ticketUUIDStr).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectCommit()
 
 	req := httptest.NewRequest(http.MethodGet, "/fifo/"+fifoUUIDStr+"/ticket", nil)
 	rec := httptest.NewRecorder()
@@ -134,24 +141,40 @@ func TestWait(t *testing.T) {
 
 	mgr := newTestFifoManager(t, gormDB, mock)
 
-	fifoUUIDStr := "00000000-0000-0000-0000-000000000000"
-	ticketUUIDStr := "11111111-1111-1111-1111-111111111111"
-	ticketUUID, err := uuidlib.Parse(ticketUUIDStr)
+	fifoUUIDStr := "11111111-1111-1111-1111-111111111111"
+	ticketUUIDStr := "22222222-2222-2222-2222-222222222222"
 	require.NoError(err)
 
 	// Parse ticket UUID from the request
-	mock.ExpectQuery("SELECT \\* FROM `tickets` WHERE `tickets`.`uuid` = \\?").
+	mock.ExpectQuery("SELECT \\* FROM `tickets` WHERE `tickets`.`uuid` = \\? ORDER BY `tickets`.`uuid` LIMIT 1").
 		WithArgs(ticketUUIDStr).
 		WillReturnRows(sqlmock.NewRows([]string{"uuid", "fifo_uuid"}).
 			AddRow(ticketUUIDStr, fifoUUIDStr))
+	// Get fifo details from preload
+	mock.ExpectQuery("SELECT \\* FROM `fifos` WHERE `fifos`.`uuid` = \\?").
+		WithArgs(fifoUUIDStr).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "wait_timeout"}).
+			AddRow(fifoUUIDStr, 1*time.Hour))
 
 	// Update the ticket queue
+	// Insert valid active ticket, so that we can wait for the second ticket
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `tickets` WHERE `tickets`.`fifo_uuid` = \\? ORDER BY created_at ASC LIMIT 2").
-		WithArgs(fifoUUIDStr).WillReturnRows(sqlmock.NewRows([]string{"uuid", "notified_at"}))
+		WithArgs(fifoUUIDStr).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "fifo_uuid"}).
+			AddRow(ticketUUIDStr, fifoUUIDStr))
+	mock.ExpectQuery("SELECT \\* FROM `fifos` WHERE `fifos`.`uuid` = \\?").
+		WithArgs(fifoUUIDStr).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid"}).
+			AddRow(fifoUUIDStr))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `tickets` SET `notified_at`=\\? WHERE `uuid` = \\?").
+		WithArgs(sqlmock.AnyArg(), ticketUUIDStr).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 	mock.ExpectCommit()
 
-	// Update the ticket as notified
+	// Mark the ticket as accepted
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `tickets`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -163,26 +186,17 @@ func TestWait(t *testing.T) {
 	mux := http.NewServeMux()
 	mgr.registerHandlers(mux)
 
-	wg := sync.WaitGroup{}
-
-	wg.Add(1)
+	done := make(chan struct{})
 	go func() {
-		defer wg.Done()
+		defer close(done)
 		mux.ServeHTTP(rec, req)
 	}()
 
-	require.Eventually(func() bool {
-		mgr.waitersMux.RLock()
-		defer mgr.waitersMux.RUnlock()
-		ch, ok := mgr.waiters[ticketUUID]
-		if ok {
-			close(ch)
-			return true
-		}
-		return false
-	}, 200*time.Millisecond, 40*time.Millisecond)
-
-	wg.Wait()
+	select {
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for the request to complete")
+	case <-done:
+	}
 
 	require.NoError(mock.ExpectationsWereMet())
 
@@ -190,16 +204,4 @@ func TestWait(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(http.StatusOK, resp.StatusCode)
-}
-
-func expectUpdateTicketQueue(mock sqlmock.Sqlmock, fifoUUIDStr, ticketUUIDStr string) {
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT \\* FROM `tickets` WHERE `tickets`.`fifo_uuid` = \\? ORDER BY created_at ASC LIMIT 2").
-		WithArgs(fifoUUIDStr).
-		WillReturnRows(sqlmock.NewRows([]string{"uuid", "notified_at"}).AddRow(ticketUUIDStr, nil))
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `tickets`").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-	mock.ExpectCommit()
 }
