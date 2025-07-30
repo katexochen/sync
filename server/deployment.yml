@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: sync
 spec:
@@ -14,14 +14,28 @@ spec:
     spec:
       containers:
         - name: sync
-          image: "ghcr.io/katexochen/sync:v0.0.1"
+          image: "ghcr.io/katexochen/sync:v0.0.2"
           ports:
             - containerPort: 8080
+          env:
+            - name: FIFO_DB_PATH
+              value: "/state/fifo.db"
           resources:
             limits:
               memory: 200Mi
             requests:
               memory: 200Mi
+          volumeMounts:
+            - name: fifo-db
+              mountPath: /state
+  volumeClaimTemplates:
+    - metadata:
+        name: fifo-db
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
 ---
 apiVersion: v1
 kind: Service

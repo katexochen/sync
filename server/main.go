@@ -7,20 +7,25 @@ import (
 	"os"
 
 	gormlogger "gorm.io/gorm/logger"
+	"k8s.io/utils/clock"
 )
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	log.Info("started")
 
-	db, err := newSqliteDB("state", gormlogger.Info)
+	path := os.Getenv("FIFO_DB_PATH")
+	if path == "" {
+		path = "state"
+	}
+	db, err := newSqliteDB(path, gormlogger.Info)
 	if err != nil {
 		log.Error("fatal", "err", fmt.Errorf("opening sqlite database: %w", err))
 		os.Exit(1)
 	}
 
 	mux := http.NewServeMux()
-	fm := newFifoManager(db, log)
+	fm := newFifoManager(db, clock.RealClock{}, log)
 	fm.registerHandlers(mux)
 
 	if err := http.ListenAndServe(":8080", mux); err != nil {
