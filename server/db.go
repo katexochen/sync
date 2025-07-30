@@ -9,11 +9,11 @@ import (
 )
 
 func newSqliteDB(path string, loglevel gormlogger.LogLevel) (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open("state"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite database at %s: %w", path, err)
 	}
-	db.Logger = db.Logger.LogMode(gormlogger.Info)
+	db.Logger = db.Logger.LogMode(loglevel)
 
 	// See https://developer.android.com/topic/performance/sqlite-performance-best-practices
 	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
