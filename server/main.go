@@ -11,7 +11,9 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
 	log.Info("started")
 
 	path := os.Getenv("FIFO_DB_PATH")
