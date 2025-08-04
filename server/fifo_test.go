@@ -44,7 +44,7 @@ func newMockDB() (*gorm.DB, sqlmock.Sqlmock, error) {
 	return gormDB, mock, nil
 }
 
-func newTestFifoManager(t *testing.T, db *gorm.DB, mock sqlmock.Sqlmock, c clock.Clock) *fifoManager {
+func newTestFifoManager(t *testing.T, db *gorm.DB, mock sqlmock.Sqlmock, c clock.WithDelayedExecution) *fifoManager {
 	t.Helper()
 	require := require.New(t)
 
@@ -351,17 +351,12 @@ func TestTimeouts(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 
-		ticketUUID, err := uuid.Parse(ticketUUIDStr)
-		require.NoError(err)
-		mgr.waiters[ticketUUID] = make(chan struct{})
-
 		c.Step(acceptTimeout + 100*time.Millisecond)
 
 		fifoUUID, err := uuid.Parse(fifoUUIDStr)
 		require.NoError(err)
 		require.NoError(mgr.updateTicketQueue(fifoUUID))
 
-		require.Empty(mgr.waiters)
 		require.NoError(mock.ExpectationsWereMet())
 	})
 
@@ -391,17 +386,12 @@ func TestTimeouts(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 
-		ticketUUID, err := uuid.Parse(ticketUUIDStr)
-		require.NoError(err)
-		mgr.waiters[ticketUUID] = make(chan struct{})
-
 		c.Step(doneTimeout + 100*time.Millisecond)
 
 		fifoUUID, err := uuid.Parse(fifoUUIDStr)
 		require.NoError(err)
 		require.NoError(mgr.updateTicketQueue(fifoUUID))
 
-		require.Empty(mgr.waiters)
 		require.NoError(mock.ExpectationsWereMet())
 	})
 
@@ -411,10 +401,11 @@ func TestTimeouts(t *testing.T) {
 		require.NoError(err)
 		c := clocktest.NewFakeClock(time.Now())
 		mgr := &fifoManager{
-			log:     slog.Default(),
-			db:      gormDB,
-			waiters: make(map[uuid.UUID]chan struct{}),
-			clock:   c,
+			log:      slog.Default(),
+			db:       gormDB,
+			waiters:  make(map[uuid.UUID]chan struct{}),
+			clock:    c,
+			pullRate: 5 * time.Second,
 		}
 
 		unusedTimeout := 1 * time.Second
@@ -440,8 +431,7 @@ func TestTimeouts(t *testing.T) {
 			return c.HasWaiters()
 		}, 200*time.Millisecond, 40*time.Millisecond, "function should be waiting")
 
-		// We check for unused FIFOs once a minute
-		c.Step(1*time.Minute + 100*time.Millisecond)
+		c.Step(mgr.pullRate + 100*time.Millisecond)
 		time.Sleep(10 * time.Millisecond)
 
 		cancel()

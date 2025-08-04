@@ -44,23 +44,48 @@ type fifoManager struct {
 	db         *gorm.DB
 	waiters    map[uuidlib.UUID]chan struct{}
 	waitersMux sync.RWMutex
-	clock      clock.Clock
+	clock      clock.WithDelayedExecution
+	notifyCh   chan uuidlib.UUID
+	pullRate   time.Duration
+}
+
+func (m *fifoManager) updateFifo(tx *gorm.DB, fifoUUID uuidlib.UUID) error {
+	fifo := &fifo{UUID: fifoUUID}
+	if err := tx.First(fifo).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("fifo %s not found", fifoUUID.String())
+	} else if err != nil {
+		m.log.Error("db query failed", "err", err)
+		return fmt.Errorf("db query failed: %w", err)
+	}
+	// Mark the fifo as updated to prevent it from being deleted
+	fifo.UpdatedAt = m.clock.Now()
+	if err := tx.Select("UpdatedAt").Updates(&fifo).Error; err != nil {
+		m.log.Error("db update failed", "err", err)
+		return fmt.Errorf("db update failed: %w", err)
+	}
+	return nil
+}
+
+func (m *fifoManager) checkTimeouts(t ticket) error {
+	if t.NotifiedAt != nil && t.AcceptedAt == nil && m.clock.Now().After(t.NotifiedAt.Add(t.AcceptTimeout)) {
+		m.log.Warn("ticket was not accepted in time", "ticket", t.UUID.String())
+		return fmt.Errorf("ticket %s was not accepted in time", t.UUID.String())
+	}
+	if t.AcceptedAt != nil && m.clock.Now().After(t.AcceptedAt.Add(t.DoneTimeout)) {
+		m.log.Warn("ticket was not marked as done in time", "ticket", t.UUID.String())
+		return fmt.Errorf("ticket %s was not marked as done in time", t.UUID.String())
+	}
+	return nil
 }
 
 func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 	return m.db.Transaction(func(tx *gorm.DB) error {
-		fifo := &fifo{UUID: fifoUUID}
-		if err := tx.First(fifo).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("fifo %s not found", fifoUUID.String())
-		} else if err != nil {
-			m.log.Error("db query failed", "err", err)
-			return fmt.Errorf("db query failed: %w", err)
+		// Update the fifo to mark it as used
+		if err := m.updateFifo(tx, fifoUUID); err != nil {
+			m.log.Error("updating fifo failed", "fifo", fifoUUID.String(), "err", err)
+			return fmt.Errorf("updating fifo failed: %w", err)
 		}
-		// Mark the fifo as updated to prevent it from being deleted
-		fifo.UpdatedAt = m.clock.Now()
-		if err := tx.Select("UpdatedAt").Updates(&fifo).Error; err != nil {
-			m.log.Error("db update failed", "err", err)
-		}
+		// Get the first two tickets in the queue for the fifo
 		tickets := make([]ticket, 0, 2)
 		if err := tx.Order("created_at ASC").
 			Where(&ticket{FifoUUID: fifoUUID}, "FifoUUID", "DoneAt").
@@ -74,27 +99,15 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 		if len(tickets) == 0 {
 			return nil
 		}
-		// The active ticket was not accepted in time
-		if tickets[0].NotifiedAt != nil && m.clock.Now().After(tickets[0].NotifiedAt.Add(tickets[0].AcceptTimeout)) {
-			m.removeWaiter(tickets[0].UUID)
+		if err := m.checkTimeouts(tickets[0]); err != nil {
 			if err := tx.Delete(&tickets[0]).Error; err != nil {
 				m.log.Error("db delete failed", "err", err)
 				return fmt.Errorf("db delete failed: %w", err)
 			}
 			tickets = tickets[1:]
-			// If there is no active ticket left, we are done
-			if len(tickets) == 0 {
-				return nil
-			}
 		}
-		// If there is more than one ticket, delete the first one if it is not marked as done in time
-		if len(tickets) == 2 && tickets[0].AcceptedAt != nil && m.clock.Now().After(tickets[0].AcceptedAt.Add(tickets[0].DoneTimeout)) {
-			m.removeWaiter(tickets[0].UUID)
-			if err := tx.Delete(&tickets[0]).Error; err != nil {
-				m.log.Error("db delete failed", "err", err)
-				return fmt.Errorf("db delete failed: %w", err)
-			}
-			tickets = tickets[1:]
+		if len(tickets) == 0 {
+			return nil
 		}
 		// If there is no active ticket, we notify the first one in the queue
 		if tickets[0].NotifiedAt == nil {
@@ -103,7 +116,12 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 				m.log.Error("db save failed", "err", err)
 				return fmt.Errorf("db save failed: %w", err)
 			}
+			m.clock.AfterFunc(tickets[0].AcceptTimeout, func() {
+				m.log.Debug("ticket accept timeout reached", "ticket", tickets[0].UUID.String())
+				m.notifyCh <- tickets[0].UUID
+			})
 		}
+		// In any case, ensure we notify the waiters for the first ticket
 		if waitC, ok := m.getWaiter(tickets[0].UUID); ok {
 			close(waitC)
 			m.removeWaiter(tickets[0].UUID)
@@ -147,8 +165,22 @@ func (m *fifoManager) run(ctx context.Context) {
 		case <-ctx.Done():
 			m.log.Info("fifo manager stopped")
 			return
-		case <-m.clock.After(time.Minute):
-			m.log.Info("checking for unused fifos")
+		case uuid := <-m.notifyCh:
+			m.log.Debug("checking ticket timeout", "ticket", uuid.String())
+			tick := &ticket{UUID: uuid}
+			if err := m.db.First(tick).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			} else if err != nil {
+				m.log.Error("db query failed", "err", err)
+				continue
+			}
+			if err := m.checkTimeouts(*tick); err != nil {
+				if err := m.updateTicketQueue(tick.FifoUUID); err != nil {
+					m.log.Error("updating ticket queue failed", "fifo", tick.FifoUUID.String(), "err", err)
+				}
+			}
+		case <-m.clock.After(m.pullRate):
+			m.log.Debug("checking for unused fifos")
 			var fifos []fifo
 			if err := m.db.Find(&fifos).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
@@ -168,16 +200,18 @@ func (m *fifoManager) run(ctx context.Context) {
 	}
 }
 
-func newFifoManager(db *gorm.DB, clock clock.Clock, log *slog.Logger) *fifoManager {
+func newFifoManager(db *gorm.DB, clock clock.WithDelayedExecution, log *slog.Logger) *fifoManager {
 	db.AutoMigrate(
 		&fifo{},
 		&ticket{},
 	)
 	fm := &fifoManager{
-		log:     log,
-		db:      db,
-		waiters: make(map[uuidlib.UUID]chan struct{}),
-		clock:   clock,
+		log:      log,
+		db:       db,
+		waiters:  make(map[uuidlib.UUID]chan struct{}),
+		clock:    clock,
+		notifyCh: make(chan uuidlib.UUID, 100),
+		pullRate: 5 * time.Minute,
 	}
 	go fm.run(context.Background())
 	return fm
@@ -295,6 +329,7 @@ func (m *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tick.WaitTimeout = waitTimeout
+			m.log.Debug("wait timeout set", "wait_timeout", tick.WaitTimeout)
 		}
 		if r.FormValue("accept_timeout") != "" {
 			acceptTimeout, err := time.ParseDuration(r.FormValue("accept_timeout"))
@@ -304,6 +339,7 @@ func (m *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tick.AcceptTimeout = acceptTimeout
+			m.log.Debug("accept timeout set", "accept_timeout", tick.AcceptTimeout)
 		}
 		if r.FormValue("done_timeout") != "" {
 			doneTimeout, err := time.ParseDuration(r.FormValue("done_timeout"))
@@ -313,6 +349,7 @@ func (m *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tick.DoneTimeout = doneTimeout
+			m.log.Debug("done timeout set", "done_timeout", tick.DoneTimeout)
 		}
 	}
 
@@ -362,30 +399,27 @@ func (m *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 	log.Info("found ticket")
 
 	// If the ticket is already notified, we don't need to wait
-	if tick.NotifiedAt != nil {
-		log.Info("ticket already notified")
-		return
-	}
+	if tick.NotifiedAt == nil {
+		waitC := m.getOrCreateWaiter(tick.UUID)
 
-	waitC := m.getOrCreateWaiter(tick.UUID)
+		if err := m.updateTicketQueue(tick.FifoUUID); err != nil {
+			log.Error("updating ticket queue failed", "err", err)
+			http.Error(w, "updating ticket queue failed", http.StatusInternalServerError)
+			return
+		}
 
-	if err := m.updateTicketQueue(tick.FifoUUID); err != nil {
-		log.Error("updating ticket queue failed", "err", err)
-		http.Error(w, "updating ticket queue failed", http.StatusInternalServerError)
-		return
-	}
-
-	select {
-	case <-m.clock.After(tick.WaitTimeout):
-		log.Info("wait timeout reached")
-		http.Error(w, "wait timeout reached", http.StatusRequestTimeout)
-		return
-	case <-waitC:
+		select {
+		case <-m.clock.After(tick.WaitTimeout):
+			log.Info("wait timeout reached")
+			http.Error(w, "wait timeout reached", http.StatusRequestTimeout)
+			return
+		case <-waitC:
+		}
 	}
 
 	now := m.clock.Now()
 	tick.AcceptedAt = &now
-	tx := m.db.Where("accepted_at = ?", nil).Select("AcceptedAt").Updates(tick)
+	tx := m.db.Where("accepted_at IS NULL").Select("AcceptedAt").Updates(tick)
 	if tx.Error != nil {
 		log.Error("updating accepted_at failed", "err", err)
 		http.Error(w, "updating accepted_at failed", http.StatusInternalServerError)
@@ -394,6 +428,10 @@ func (m *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 		log.Info("ticket was already accepted")
 	} else {
 		log.Info("ticket accepted")
+		m.clock.AfterFunc(tick.DoneTimeout, func() {
+			m.log.Debug("ticket done timeout reached", "ticket", tick.UUID.String())
+			m.notifyCh <- tick.UUID
+		})
 	}
 }
 
