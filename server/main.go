@@ -27,7 +27,11 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	fm := newFifoManager(db, clock.RealClock{}, log)
+	fm, err := newFifoManager(db, clock.RealClock{}, log)
+	if err != nil {
+		log.Error("fatal", "err", fmt.Errorf("creating fifo manager: %w", err))
+		os.Exit(1)
+	}
 	fm.registerHandlers(mux)
 
 	if err := http.ListenAndServe(":8080", mux); err != nil {
