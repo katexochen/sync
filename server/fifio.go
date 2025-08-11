@@ -40,13 +40,15 @@ type ticket struct {
 }
 
 type fifoManager struct {
-	log        *slog.Logger
-	db         *gorm.DB
-	waiters    map[uuidlib.UUID]chan struct{}
-	waitersMux sync.RWMutex
-	clock      clock.WithDelayedExecution
-	notifyCh   chan uuidlib.UUID
-	pullRate   time.Duration
+	log          *slog.Logger
+	db           *gorm.DB
+	waiters      map[uuidlib.UUID]chan struct{}
+	waitersMux   sync.RWMutex
+	clock        clock.WithDelayedExecution
+	notifyCh     chan uuidlib.UUID
+	notifiers    map[uuidlib.UUID]struct{}
+	notifiersMux sync.RWMutex
+	pullRate     time.Duration
 }
 
 func (m *fifoManager) updateFifo(tx *gorm.DB, fifoUUID uuidlib.UUID) error {
@@ -104,6 +106,11 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 				m.log.Error("db delete failed", "err", err)
 				return fmt.Errorf("db delete failed: %w", err)
 			}
+			// Ensure late wait calls are notified
+			if waitC, ok := m.getWaiter(tickets[0].UUID); ok {
+				close(waitC)
+				m.removeWaiter(tickets[0].UUID)
+			}
 			tickets = tickets[1:]
 		}
 		if len(tickets) == 0 {
@@ -116,10 +123,11 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 				m.log.Error("db save failed", "err", err)
 				return fmt.Errorf("db save failed: %w", err)
 			}
-			m.clock.AfterFunc(tickets[0].AcceptTimeout, func() {
-				m.log.Debug("ticket accept timeout reached", "ticket", tickets[0].UUID.String())
-				m.notifyCh <- tickets[0].UUID
-			})
+		}
+		if tickets[0].AcceptedAt == nil {
+			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].AcceptTimeout))
+		} else {
+			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].WaitTimeout))
 		}
 		// In any case, ensure we notify the waiters for the first ticket
 		if waitC, ok := m.getWaiter(tickets[0].UUID); ok {
@@ -159,6 +167,19 @@ func (m *fifoManager) getOrCreateWaiter(uuid uuidlib.UUID) chan struct{} {
 	return waitC
 }
 
+func (m *fifoManager) notifyOnce(uuid uuidlib.UUID, t time.Time) {
+	m.notifiersMux.Lock()
+	defer m.notifiersMux.Unlock()
+	if _, ok := m.notifiers[uuid]; ok {
+		return
+	}
+	m.notifiers[uuid] = struct{}{}
+	m.clock.AfterFunc(-m.clock.Since(t), func() {
+		m.log.Debug("ticket timeout reached", "ticket", uuid.String())
+		m.notifyCh <- uuid
+	})
+}
+
 func (m *fifoManager) run(ctx context.Context) {
 	for {
 		select {
@@ -166,6 +187,9 @@ func (m *fifoManager) run(ctx context.Context) {
 			m.log.Info("fifo manager stopped")
 			return
 		case uuid := <-m.notifyCh:
+			m.notifiersMux.Lock()
+			delete(m.notifiers, uuid)
+			m.notifiersMux.Unlock()
 			m.log.Debug("checking ticket timeout", "ticket", uuid.String())
 			tick := &ticket{UUID: uuid}
 			if err := m.db.First(tick).Error; errors.Is(err, gorm.ErrRecordNotFound) {
@@ -206,12 +230,13 @@ func newFifoManager(db *gorm.DB, clock clock.WithDelayedExecution, log *slog.Log
 		&ticket{},
 	)
 	fm := &fifoManager{
-		log:      log,
-		db:       db,
-		waiters:  make(map[uuidlib.UUID]chan struct{}),
-		clock:    clock,
-		notifyCh: make(chan uuidlib.UUID, 100),
-		pullRate: 5 * time.Minute,
+		log:       log,
+		db:        db,
+		waiters:   make(map[uuidlib.UUID]chan struct{}),
+		clock:     clock,
+		notifyCh:  make(chan uuidlib.UUID, 100),
+		notifiers: make(map[uuidlib.UUID]struct{}),
+		pullRate:  5 * time.Minute,
 	}
 	go fm.run(context.Background())
 	return fm
@@ -398,23 +423,26 @@ func (m *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("found ticket")
 
-	// If the ticket is already notified, we don't need to wait
-	if tick.NotifiedAt == nil {
-		waitC := m.getOrCreateWaiter(tick.UUID)
+	waitC := m.getOrCreateWaiter(tick.UUID)
 
-		if err := m.updateTicketQueue(tick.FifoUUID); err != nil {
-			log.Error("updating ticket queue failed", "err", err)
-			http.Error(w, "updating ticket queue failed", http.StatusInternalServerError)
-			return
-		}
+	if err := m.updateTicketQueue(tick.FifoUUID); err != nil {
+		log.Error("updating ticket queue failed", "err", err)
+		http.Error(w, "updating ticket queue failed", http.StatusInternalServerError)
+		return
+	}
 
-		select {
-		case <-m.clock.After(tick.WaitTimeout):
-			log.Info("wait timeout reached")
-			http.Error(w, "wait timeout reached", http.StatusRequestTimeout)
-			return
-		case <-waitC:
-		}
+	select {
+	case <-m.clock.After(tick.WaitTimeout):
+		log.Info("wait timeout reached")
+		http.Error(w, "wait timeout reached", http.StatusRequestTimeout)
+		return
+	case <-waitC:
+	}
+
+	if err := m.checkTimeouts(*tick); err != nil {
+		// Ticket was not accepted in time
+		http.Error(w, err.Error(), http.StatusGone)
+		return
 	}
 
 	now := m.clock.Now()
@@ -428,10 +456,9 @@ func (m *fifoManager) wait(w http.ResponseWriter, r *http.Request) {
 		log.Info("ticket was already accepted")
 	} else {
 		log.Info("ticket accepted")
-		m.clock.AfterFunc(tick.DoneTimeout, func() {
-			m.log.Debug("ticket done timeout reached", "ticket", tick.UUID.String())
-			m.notifyCh <- tick.UUID
-		})
+		m.notifiersMux.Lock()
+		delete(m.notifiers, tick.UUID)
+		m.notifiersMux.Unlock()
 	}
 }
 
