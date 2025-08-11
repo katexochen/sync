@@ -11,10 +11,9 @@ import (
 )
 
 type Fifo struct {
-	endpoint   string
-	client     *ihttp.Client
-	fifoUUID   string
-	ticketUUID string
+	endpoint string
+	client   *ihttp.Client
+	fifoUUID string
 }
 
 func NewFifo(ctx context.Context, endpoint string) (*Fifo, error) {
@@ -45,36 +44,36 @@ func FifoFromUUID(endpoint, uuid string) *Fifo {
 	return f
 }
 
-func (f *Fifo) Ticket(ctx context.Context) error {
+func (f *Fifo) Ticket(ctx context.Context) (string, error) {
 	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "ticket")
 	if err != nil {
-		return err
+		return "", err
 	}
 	resp := &api.FifoTicketResponse{}
 	if err := f.client.RequestJSON(ctx, url, http.NoBody, resp); err != nil {
-		return err
+		return "", err
 	}
-	f.ticketUUID = resp.TicketID.String()
-	return nil
+	return resp.TicketID.String(), nil
 }
 
-func (f *Fifo) Wait(ctx context.Context) error {
-	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "wait", f.ticketUUID)
+func (f *Fifo) Wait(ctx context.Context, ticketUUID string) error {
+	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "wait", ticketUUID)
 	if err != nil {
 		return err
 	}
 	return f.client.Get(ctx, url)
 }
 
-func (f *Fifo) TicketAndWait(ctx context.Context) error {
-	if err := f.Ticket(ctx); err != nil {
-		return err
+func (f *Fifo) TicketAndWait(ctx context.Context) (string, error) {
+	uuid, err := f.Ticket(ctx)
+	if err != nil {
+		return uuid, err
 	}
-	return f.Wait(ctx)
+	return uuid, f.Wait(ctx, uuid)
 }
 
-func (f *Fifo) Done(ctx context.Context) error {
-	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "done", f.ticketUUID)
+func (f *Fifo) Done(ctx context.Context, ticketUUID string) error {
+	url, err := urlJoin(f.endpoint, "fifo", f.fifoUUID, "done", ticketUUID)
 	if err != nil {
 		return err
 	}
