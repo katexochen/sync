@@ -224,11 +224,14 @@ func (m *fifoManager) run(ctx context.Context) {
 	}
 }
 
-func newFifoManager(db *gorm.DB, clock clock.WithDelayedExecution, log *slog.Logger) *fifoManager {
-	db.AutoMigrate(
+func newFifoManager(db *gorm.DB, clock clock.WithDelayedExecution, log *slog.Logger) (*fifoManager, error) {
+	if err := db.AutoMigrate(
 		&fifo{},
 		&ticket{},
-	)
+	); err != nil {
+		log.Error("db migration failed", "err", err)
+		return nil, fmt.Errorf("db migration failed: %w", err)
+	}
 	fm := &fifoManager{
 		log:       log,
 		db:        db,
@@ -239,7 +242,7 @@ func newFifoManager(db *gorm.DB, clock clock.WithDelayedExecution, log *slog.Log
 		pullRate:  5 * time.Minute,
 	}
 	go fm.run(context.Background())
-	return fm
+	return fm, nil
 }
 
 func (m *fifoManager) registerHandlers(mux *http.ServeMux) {
@@ -310,7 +313,11 @@ func (m *fifoManager) new(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	encode(w, 200, api.FifoNewResponse{UUID: fifo.UUID})
+	if err := encode(w, 200, api.FifoNewResponse{UUID: fifo.UUID}); err != nil {
+		log.Error("encoding response failed", "err", err)
+		http.Error(w, "encoding response failed", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (m *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +397,11 @@ func (m *fifoManager) ticket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Info("ticket created", "ticket", tick.UUID.String())
-	encode(w, 200, api.FifoTicketResponse{TicketID: tick.UUID})
+	if err := encode(w, 200, api.FifoTicketResponse{TicketID: tick.UUID}); err != nil {
+		log.Error("encoding response failed", "err", err)
+		http.Error(w, "encoding response failed", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (m *fifoManager) wait(w http.ResponseWriter, r *http.Request) {

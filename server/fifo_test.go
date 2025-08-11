@@ -53,7 +53,8 @@ func newTestFifoManager(t *testing.T, db *gorm.DB, mock sqlmock.Sqlmock, c clock
 	mock.ExpectExec("CREATE TABLE `tickets`").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	mgr := newFifoManager(db, c, slog.Default())
+	mgr, err := newFifoManager(db, c, slog.Default())
+	require.NoError(err)
 	require.NoError(mock.ExpectationsWereMet())
 
 	return mgr
