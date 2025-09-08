@@ -20,7 +20,7 @@
         packages = rec {
           sync-server = pkgs.buildGoModule {
             pname = "sync-server";
-            version = "0.0.2";
+            version = "0.0.3";
             src = lib.cleanSource ./.;
             proxyVendor = true;
             vendorHash = "sha256-u/2f64uztk19tG9gz+FYimYPyPZwZc6pUKwYHh6jDgI=";

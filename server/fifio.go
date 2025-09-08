@@ -99,6 +99,7 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 		}
 		// The ticket queue is empty
 		if len(tickets) == 0 {
+			m.log.Debug("ticket queue is empty", "fifo", fifoUUID.String())
 			return nil
 		}
 		if err := m.checkTimeouts(tickets[0]); err != nil {
@@ -114,6 +115,7 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 			tickets = tickets[1:]
 		}
 		if len(tickets) == 0 {
+			m.log.Debug("ticket queue is empty", "fifo", fifoUUID.String())
 			return nil
 		}
 		// If there is no active ticket, we notify the first one in the queue
@@ -125,11 +127,17 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 			}
 		}
 		if tickets[0].AcceptedAt == nil {
+			m.log.Debug("notifying ticket for acceptance", "ticket", tickets[0].UUID.String())
 			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].AcceptTimeout))
 		} else {
+			m.log.Debug("notifying ticket for done", "ticket", tickets[0].UUID.String())
 			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].WaitTimeout))
 		}
 		// In any case, ensure we notify the waiters for the first ticket
+		m.log.Debug("notifying waiter for active ticket", "ticket", tickets[0].UUID.String())
+		if len(tickets) == 2 {
+			m.log.Debug("second ticket in queue", "ticket", tickets[1].UUID.String())
+		}
 		if waitC, ok := m.getWaiter(tickets[0].UUID); ok {
 			close(waitC)
 			m.removeWaiter(tickets[0].UUID)
@@ -171,11 +179,13 @@ func (m *fifoManager) notifyOnce(uuid uuidlib.UUID, t time.Time) {
 	m.notifiersMux.Lock()
 	defer m.notifiersMux.Unlock()
 	if _, ok := m.notifiers[uuid]; ok {
+		m.log.Debug("ticket already scheduled for notification", "ticket", uuid.String())
 		return
 	}
+	m.log.Debug("scheduling ticket timeout", "ticket", uuid.String(), "at", t)
 	m.notifiers[uuid] = struct{}{}
 	m.clock.AfterFunc(-m.clock.Since(t), func() {
-		m.log.Debug("ticket timeout reached", "ticket", uuid.String())
+		m.log.Debug("notify timeout reached", "ticket", uuid.String())
 		m.notifyCh <- uuid
 	})
 }
