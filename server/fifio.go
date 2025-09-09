@@ -131,7 +131,7 @@ func (m *fifoManager) updateTicketQueue(fifoUUID uuidlib.UUID) error {
 			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].AcceptTimeout))
 		} else {
 			m.log.Debug("notifying ticket for done", "ticket", tickets[0].UUID.String())
-			m.notifyOnce(tickets[0].UUID, tickets[0].NotifiedAt.Add(tickets[0].WaitTimeout))
+			m.notifyOnce(tickets[0].UUID, tickets[0].AcceptedAt.Add(tickets[0].DoneTimeout))
 		}
 		// In any case, ensure we notify the waiters for the first ticket
 		m.log.Debug("notifying waiter for active ticket", "ticket", tickets[0].UUID.String())
@@ -271,7 +271,7 @@ func (m *fifoManager) new(w http.ResponseWriter, r *http.Request) {
 		UUID:                 uuid,
 		WaitTimeout:          6 * time.Hour,
 		AcceptTimeout:        1 * time.Minute,
-		DoneTimeout:          10 * time.Minute,
+		DoneTimeout:          20 * time.Minute,
 		UnusedDestroyTimeout: 30 * 24 * time.Hour,
 		AllowOverrides:       false,
 	}
@@ -512,7 +512,12 @@ func (m *fifoManager) done(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.removeWaiter(tick.UUID)
+	// Ensure any waiters are notified, in case done is called on a ticket that was not active
+	if waitC, ok := m.getWaiter(tick.UUID); ok {
+		close(waitC)
+		m.removeWaiter(tick.UUID)
+	}
+
 	if err := m.db.Delete(tick).Error; err != nil {
 		log.Error("db delete failed", "err", err)
 		http.Error(w, "db delete failed", http.StatusInternalServerError)
